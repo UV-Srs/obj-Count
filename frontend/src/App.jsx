@@ -4,7 +4,6 @@ import {
   Upload,
   Download,
   FileSpreadsheet,
-  RotateCcw,
   AlertCircle,
   ChevronDown,
   ChevronUp,
@@ -26,6 +25,14 @@ export default function App() {
   const [dragActive, setDragActive] = useState(false);
 
   const fileInputRef = useRef(null);
+
+  // Directly open native OS file manager
+  const handleOpenFileDialog = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
 
   // Process uploaded image file
   const processFile = async (file) => {
@@ -125,15 +132,6 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  // Reset to upload state
-  const handleReset = () => {
-    setResult(null);
-    setOriginalImageSrc(null);
-    setActiveFile(null);
-    setError(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
   return (
     <div className="app-layout">
       {/* Side Navigation Bar - Only 1 item: Dashboard */}
@@ -165,14 +163,27 @@ export default function App() {
           </div>
 
           {result && (
-            <button type="button" className="btn btn-secondary" onClick={handleReset}>
-              <RotateCcw size={14} />
+            <button
+              type="button"
+              className="btn btn-upload-new"
+              onClick={handleOpenFileDialog}
+            >
+              <Upload size={15} />
               <span>Upload New Image</span>
             </button>
           )}
         </header>
 
         <div className="page-body">
+          {/* Persistent Hidden File Input for instant OS file manager trigger */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden-file-input"
+            accept=".jpg,.jpeg,.jfif,.gfif,.png,.webp,.bmp,.tiff,.tif,.gif"
+            onChange={handleFileInput}
+          />
+
           {/* Error Message */}
           {error && (
             <div className="alert alert-error">
@@ -181,7 +192,7 @@ export default function App() {
             </div>
           )}
 
-          {/* Upload Dropzone */}
+          {/* Upload Dropzone (First Time / Empty State) */}
           {!result && !loading && (
             <div
               className={`dropzone ${dragActive ? 'drag-active' : ''}`}
@@ -189,15 +200,8 @@ export default function App() {
               onDragLeave={handleDrag}
               onDragOver={handleDrag}
               onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={handleOpenFileDialog}
             >
-              <input
-                ref={fileInputRef}
-                type="file"
-                className="hidden-file-input"
-                accept=".jpg,.jpeg,.jfif,.gfif,.png,.webp,.bmp,.tiff,.tif,.gif"
-                onChange={handleFileInput}
-              />
               <div className="dropzone-icon">
                 <Upload size={32} />
               </div>
