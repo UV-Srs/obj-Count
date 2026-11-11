@@ -110,42 +110,6 @@ body {
   color: #ffffff;
 }
 
-.sidebar-footer {
-  padding-top: 16px;
-  border-top: 1px solid #f1f5f9;
-}
-
-.status-badge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background-color: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.status-dot.online {
-  background-color: #10b981;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
-}
-
-.status-dot.offline {
-  background-color: #ef4444;
-}
-
-.status-text {
-  font-size: 12px;
-  font-weight: 500;
-  color: #475569;
-}
-
 /* Main Viewport */
 .main-viewport {
   flex: 1;
@@ -532,10 +496,6 @@ body {
 
   .sidebar-nav {
     margin-top: 12px;
-  }
-
-  .sidebar-footer {
-    display: none;
   }
 
   .stats-grid {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   LayoutDashboard,
   Upload,
@@ -15,7 +15,6 @@ import './App.css';
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 export default function App() {
-  const [backendOnline, setBackendOnline] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -27,22 +26,6 @@ export default function App() {
   const [dragActive, setDragActive] = useState(false);
 
   const fileInputRef = useRef(null);
-
-  // Monitor backend health
-  useEffect(() => {
-    checkHealth();
-    const interval = setInterval(checkHealth, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const checkHealth = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/health`, { method: 'GET' });
-      setBackendOnline(res.ok);
-    } catch {
-      setBackendOnline(false);
-    }
-  };
 
   // Process uploaded image file
   const processFile = async (file) => {
@@ -117,10 +100,10 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  // Export CSV
+  // Export CSV (Pipe_ID, X1, Y1, X2, Y2, Width, Height)
   const handleExportCSV = () => {
     if (!result?.detections?.length) return;
-    const headers = ['Pipe_ID', 'X1', 'Y1', 'X2', 'Y2', 'Width', 'Height', 'Confidence'];
+    const headers = ['Pipe_ID', 'X1', 'Y1', 'X2', 'Y2', 'Width', 'Height'];
     const rows = result.detections.map((d) => [
       d.id,
       d.x1,
@@ -129,7 +112,6 @@ export default function App() {
       d.y2,
       d.width,
       d.height,
-      (d.conf * 100).toFixed(1) + '%',
     ]);
     const csvContent =
       'data:text/csv;charset=utf-8,' +
@@ -172,13 +154,6 @@ export default function App() {
             <span>Dashboard</span>
           </button>
         </nav>
-
-        <div className="sidebar-footer">
-          <div className="status-badge">
-            <span className={`status-dot ${backendOnline ? 'online' : 'offline'}`} />
-            <span className="status-text">{backendOnline ? 'System Online' : 'System Offline'}</span>
-          </div>
-        </div>
       </aside>
 
       {/* Main Viewport */}
@@ -298,7 +273,7 @@ export default function App() {
                 </div>
               </section>
 
-              {/* Coordinates Accordion */}
+              {/* Coordinates Accordion without Confidence column */}
               <div className="table-accordion">
                 <button
                   type="button"
@@ -318,7 +293,6 @@ export default function App() {
                           <th>Bounding Box</th>
                           <th>Width</th>
                           <th>Height</th>
-                          <th>Confidence</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -328,7 +302,6 @@ export default function App() {
                             <td>[{d.x1}, {d.y1}, {d.x2}, {d.y2}]</td>
                             <td>{d.width}px</td>
                             <td>{d.height}px</td>
-                            <td>{(d.conf * 100).toFixed(1)}%</td>
                           </tr>
                         ))}
                       </tbody>

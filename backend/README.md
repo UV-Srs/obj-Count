@@ -55,3 +55,4 @@ annotated_image, detections = detector.detect("sample_test/box_touching_grid_70.
 
 print(f"Total pipes counted: {len(detections)}")
 ```
+
