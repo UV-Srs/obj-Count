@@ -1,0 +1,35 @@
+# Node.js & Frontend
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+.vite/
+frontend/.vite/
+
+# Python & Caches
+__pycache__/
+backend/__pycache__/
+*.py[cod]
+*$py.class
+*.bak
+backend/*.bak
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# Virtual Environments & IDE
+.venv/
+env/
+venv/
+.vscode/
+.idea/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Intermediate training runs (weights are saved in backend/models/)
+runs/
+backend/runs/
