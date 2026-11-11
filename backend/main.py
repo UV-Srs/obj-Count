@@ -60,8 +60,10 @@ def api_root():
         "health": "/api/health"
     }
 
-# Initialize detector with default production weights
-MODEL_PATH = str(BACKEND_DIR / "models" / "best_insulation_pipe_clean.pt")
+# Initialize detector with default production weights (prefer ONNX for ultra-lightweight serverless)
+ONNX_MODEL = BACKEND_DIR / "models" / "best_insulation_pipe_clean.onnx"
+PT_MODEL = BACKEND_DIR / "models" / "best_insulation_pipe_clean.pt"
+MODEL_PATH = str(ONNX_MODEL if ONNX_MODEL.exists() else PT_MODEL)
 SAMPLE_DIR = BACKEND_DIR / "sample_test"
 
 detector = None

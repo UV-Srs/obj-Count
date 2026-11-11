@@ -1,6 +1,6 @@
 """
 Self-Contained Insulation Pipe Detection Engine (Anti-Double & Anti-Distractor)
-Integrates YOLOv8 deep learning model with:
+Integrates YOLOv8 deep learning model (ONNX Runtime lightweight or PyTorch) with:
 1. Anti-Double Concentric Suppression (no inner bore duplicate counts)
 2. Cardboard packaging & watermark distractor rejection
 3. Axial cylinder body suppression
@@ -10,17 +10,27 @@ Usage in any Python project:
 ----------------------------
 from insulation_detector import InsulationPipeDetector
 
-detector = InsulationPipeDetector(model_path="models/best_insulation_pipe_clean.pt")
+detector = InsulationPipeDetector(model_path="models/best_insulation_pipe_clean.onnx")
 annotated_img, detections = detector.detect("my_pipes.jpg")
 print(f"Total pipes counted: {len(detections)}")
 """
 
+import os
 import math
 import cv2
 import numpy as np
 from PIL import Image
-from ultralytics import YOLO
 from typing import List, Dict, Any, Tuple, Union
+
+try:
+    import onnxruntime as ort
+except ImportError:
+    ort = None
+
+try:
+    from ultralytics import YOLO
+except ImportError:
+    YOLO = None
 
 try:
     Image.register_extension("JPEG", ".gfif")
@@ -29,10 +39,83 @@ except Exception:
     pass
 
 
+def letterbox(im: np.ndarray, new_shape: Tuple[int, int] = (640, 640), color: Tuple[int, int, int] = (114, 114, 114)):
+    """Resize and pad image while meeting stride-multiple constraints."""
+    shape = im.shape[:2]
+    r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+    new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
+    dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]
+    dw /= 2
+    dh /= 2
+    if shape[::-1] != new_unpad:
+        im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
+    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+    im = cv2.copyMakeBorder(im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
+    return im, r, (dw, dh)
+
+
+def nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float = 0.45) -> List[int]:
+    """Standard Non-Maximum Suppression."""
+    if len(boxes) == 0:
+        return []
+    x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+    areas = (x2 - x1) * (y2 - y1)
+    order = scores.argsort()[::-1]
+    keep = []
+    while order.size > 0:
+        i = order[0]
+        keep.append(i)
+        xx1 = np.maximum(x1[i], x1[order[1:]])
+        yy1 = np.maximum(y1[i], y1[order[1:]])
+        xx2 = np.minimum(x2[i], x2[order[1:]])
+        yy2 = np.minimum(y2[i], y2[order[1:]])
+        w = np.maximum(0.0, xx2 - xx1)
+        h = np.maximum(0.0, yy2 - yy1)
+        inter = w * h
+        ovr = inter / (areas[i] + areas[order[1:]] - inter)
+        inds = np.where(ovr <= iou_threshold)[0]
+        order = order[inds + 1]
+    return keep
+
+
 class InsulationPipeDetector:
-    def __init__(self, model_path: str = "models/best_insulation_pipe_clean.pt"):
-        """Load YOLO model checkpoint."""
-        self.model = YOLO(model_path)
+    def __init__(self, model_path: str = "models/best_insulation_pipe_clean.onnx"):
+        """Load YOLO model checkpoint (prefers ONNX for ultra-lightweight execution, falls back to PyTorch)."""
+        self.model_path = model_path
+        self.use_onnx = False
+        self.session = None
+        self.torch_model = None
+
+        # Check if ONNX model is available or preferred
+        onnx_candidate = None
+        if model_path.endswith(".onnx") and os.path.exists(model_path):
+            onnx_candidate = model_path
+        elif model_path.endswith(".pt"):
+            alt_onnx = model_path[:-3] + ".onnx"
+            if os.path.exists(alt_onnx):
+                onnx_candidate = alt_onnx
+
+        if onnx_candidate and ort is not None:
+            opts = ort.SessionOptions()
+            opts.intra_op_num_threads = 2
+            opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            self.session = ort.InferenceSession(onnx_candidate, opts, providers=["CPUExecutionProvider"])
+            self.input_name = self.session.get_inputs()[0].name
+            self.use_onnx = True
+        elif YOLO is not None and os.path.exists(model_path):
+            self.torch_model = YOLO(model_path)
+            self.use_onnx = False
+        elif os.path.exists(model_path) and model_path.endswith(".onnx") and ort is not None:
+            self.session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+            self.input_name = self.session.get_inputs()[0].name
+            self.use_onnx = True
+        else:
+            raise RuntimeError(
+                f"Cannot load detector: model_path='{model_path}', "
+                f"onnx_candidate='{onnx_candidate}' (ort_loaded={ort is not None}), "
+                f"ultralytics_loaded={YOLO is not None}"
+            )
 
     def detect(
         self,
@@ -77,31 +160,68 @@ class InsulationPipeDetector:
 
         h, w = rgb.shape[:2]
 
-        # Model inference
-        results = self.model.predict(
-            source=rgb,
-            conf=conf,
-            iou=iou,
-            imgsz=imgsz,
-            verbose=False
-        )
-
         raw_boxes = []
-        for r in results:
-            for b in r.boxes:
-                c = float(b.conf[0])
-                if c < conf:
-                    continue
-                x1, y1, x2, y2 = map(int, b.xyxy[0].tolist())
-                raw_boxes.append({
-                    "x1": max(0, x1),
-                    "y1": max(0, y1),
-                    "x2": min(w, x2),
-                    "y2": min(h, y2),
-                    "conf": c,
-                    "w": x2 - x1,
-                    "h": y2 - y1
-                })
+        if self.use_onnx:
+            padded, r, (dw, dh) = letterbox(rgb, (imgsz, imgsz))
+            tensor = padded.astype(np.float32) / 255.0
+            tensor = np.ascontiguousarray(tensor.transpose(2, 0, 1)[None, ...])
+
+            outputs = self.session.run(None, {self.input_name: tensor})[0]
+            preds = outputs[0].T  # Shape: [8400, 5] (cx, cy, w, h, conf)
+
+            boxes = preds[:, :4]
+            confs = preds[:, 4]
+
+            mask = confs >= conf
+            boxes = boxes[mask]
+            confs = confs[mask]
+
+            if len(confs) > 0:
+                cx = (boxes[:, 0] - dw) / r
+                cy = (boxes[:, 1] - dh) / r
+                bw = boxes[:, 2] / r
+                bh = boxes[:, 3] / r
+
+                x1 = np.clip(cx - bw / 2, 0, w)
+                y1 = np.clip(cy - bh / 2, 0, h)
+                x2 = np.clip(cx + bw / 2, 0, w)
+                y2 = np.clip(cy + bh / 2, 0, h)
+                xyxy = np.column_stack([x1, y1, x2, y2])
+
+                keep_indices = nms(xyxy, confs, iou)
+                for idx in keep_indices:
+                    raw_boxes.append({
+                        "x1": int(xyxy[idx, 0]),
+                        "y1": int(xyxy[idx, 1]),
+                        "x2": int(xyxy[idx, 2]),
+                        "y2": int(xyxy[idx, 3]),
+                        "conf": float(confs[idx]),
+                        "w": int(xyxy[idx, 2] - xyxy[idx, 0]),
+                        "h": int(xyxy[idx, 3] - xyxy[idx, 1])
+                    })
+        else:
+            results = self.torch_model.predict(
+                source=rgb,
+                conf=conf,
+                iou=iou,
+                imgsz=imgsz,
+                verbose=False
+            )
+            for r in results:
+                for b in r.boxes:
+                    c = float(b.conf[0])
+                    if c < conf:
+                        continue
+                    x1, y1, x2, y2 = map(int, b.xyxy[0].tolist())
+                    raw_boxes.append({
+                        "x1": max(0, x1),
+                        "y1": max(0, y1),
+                        "x2": min(w, x2),
+                        "y2": min(h, y2),
+                        "conf": c,
+                        "w": x2 - x1,
+                        "h": y2 - y1
+                    })
 
         # Built-in Anti-Double & Distractor Suppression Pipeline
         filtered = self._suppress_duplicates_and_distractors(raw_boxes, rgb)
@@ -246,7 +366,6 @@ class InsulationPipeDetector:
                 bw = max(1.0, b["x2"] - b["x1"])
                 bh = max(1.0, b["y2"] - b["y1"])
                 ar = bh / bw
-                # Accommodate both circular faces and deformed/squished oval pipe cross-sections
                 if 0.52 <= ar <= 1.82:
                     circular_faces.append(b)
 
@@ -256,7 +375,6 @@ class InsulationPipeDetector:
                     bw = max(1.0, b["x2"] - b["x1"])
                     bh = max(1.0, b["y2"] - b["y1"])
                     ar = bh / bw
-                    # True longitudinal cylinder bodies have high elongation (shafts)
                     if ar > 1.85 or ar < 0.50:
                         is_duplicate_body = False
                         for cf in circular_faces:
@@ -295,4 +413,3 @@ class InsulationPipeDetector:
             remaining = clustered
 
         return remaining
-
