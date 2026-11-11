@@ -1,16 +1,48 @@
-# React + Vite
+# PipeCount - React Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The client-side web application for the Insulation Pipe Detection system, built with React 19 and Vite. Features a minimalist dashboard interface with drag-and-drop image upload, instant pipe counting, and CSV/image export.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 🚀 Run Commands
 
-## React Compiler
+### 1. Install Dependencies
+```bash
+cd frontend
+npm install
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 2. Start Local Development Server
+```bash
+npm run dev
+```
+- **Local URL:** `http://localhost:5173`
+- Proxies all `/api/*` requests to the FastAPI backend running on `http://127.0.0.1:8000`.
 
-## Expanding the Oxlint configuration
+### 3. Build for Production
+```bash
+npm run build
+```
+Generates optimized static assets in the `dist/` folder.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+### 4. Preview Production Build
+```bash
+npm run preview
+```
+Spins up a local web server to preview the production build in `dist/`.
+
+---
+
+## ⚙️ Configuration & Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `VITE_API_URL` | `""` (empty) | Base URL for the backend API. When blank, requests use relative paths (`/api/...`), which are routed via Vite's local proxy or Vercel's edge rewrites. |
+
+---
+
+## 📁 Key Files
+
+- `src/App.jsx` - Main application component (Dashboard, drag-and-drop upload, stacked image results).
+- `src/App.css` - Minimalist industrial dashboard styles.
+- `vite.config.js` - Vite configuration with `/api` reverse proxy to port 8000.

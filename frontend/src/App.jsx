@@ -248,19 +248,11 @@ export default function App() {
                 <div className="stat-card primary-stat">
                   <span className="stat-label">Total Count</span>
                   <span className="stat-number">{result.count}</span>
-                  <span className="stat-sub">Pipes Counted</span>
                 </div>
 
                 <div className="stat-card">
-                  <span className="stat-label">Avg Confidence</span>
-                  <span className="stat-number">{(result.metrics.avg_conf * 100).toFixed(1)}%</span>
-                  <span className="stat-sub">Detection score</span>
-                </div>
-
-                <div className="stat-card">
-                  <span className="stat-label">Inference Speed</span>
+                  <span className="stat-label">Processed Time</span>
                   <span className="stat-number">{result.metrics.inference_time_ms} ms</span>
-                  <span className="stat-sub">ONNX Runtime</span>
                 </div>
 
                 <div className="stat-card actions-stat">
