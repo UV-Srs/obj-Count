@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import './App.css';
 
-const API_BASE = 'http://127.0.0.1:8000';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const PRESETS = [
   { id: 'grid', label: 'Dense Grid (70 Pipes)', conf: 0.35 },
@@ -244,7 +244,7 @@ export default function App() {
               className={`status-dot ${backendOnline ? 'online' : 'offline'}`}
             ></span>
             <span className="status-text">
-              {backendOnline ? 'Backend Online (Port 8000)' : 'Backend Offline'}
+              {backendOnline ? 'Backend Online' : 'Backend Offline'}
             </span>
           </div>
         </div>

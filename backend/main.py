@@ -36,7 +36,10 @@ except Exception:
 app = FastAPI(
     title="Insulation Pipe Detection API",
     version="2.0.0",
-    description="Backend API for insulation pipe counting and defect detection."
+    description="Backend API for insulation pipe counting and defect detection.",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json"
 )
 
 # Enable CORS for React frontend (Vite default is 5173, CRA is 3000)
@@ -47,6 +50,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/api")
+@app.get("/api/")
+def api_root():
+    return {
+        "message": "Insulation Pipe Detection API is running",
+        "docs": "/api/docs",
+        "health": "/api/health"
+    }
 
 # Initialize detector with default production weights
 MODEL_PATH = str(BACKEND_DIR / "models" / "best_insulation_pipe_clean.pt")
