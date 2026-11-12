@@ -447,6 +447,38 @@ body {
   display: block;
 }
 
+.view-video {
+  max-width: 100%;
+  max-height: 520px;
+  width: 100%;
+  display: block;
+  background-color: #0b0f19;
+}
+
+.video-result-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: #0b0f19;
+}
+
+.keyframe-card {
+  width: 100%;
+  border-top: 1px solid #1e293b;
+  background-color: #0b0f19;
+}
+
+.keyframe-banner {
+  padding: 8px 16px;
+  background-color: #0f172a;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #1e293b;
+}
+
 /* Table Accordion */
 .table-accordion {
   background-color: #ffffff;

@@ -34,3 +34,8 @@ desktop.ini
 runs/
 backend/runs/
 
+# Temporary video processing cache
+temp_videos/
+backend/temp_videos/
+
+
