@@ -13,6 +13,7 @@ backend/__pycache__/
 *$py.class
 *.bak
 backend/*.bak
+*.cache
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
