@@ -38,4 +38,8 @@ backend/runs/
 temp_videos/
 backend/temp_videos/
 
+# Base pretrained weights (downloaded on demand)
+yolov8m.pt
+yolov8n.pt
+
 

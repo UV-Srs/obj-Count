@@ -20,7 +20,7 @@ import math
 import cv2
 import numpy as np
 from PIL import Image
-from typing import List, Dict, Any, Tuple, Union
+from typing import List, Dict, Any, Tuple, Union, Optional
 
 try:
     import onnxruntime as ort
@@ -86,6 +86,7 @@ class InsulationPipeDetector:
         self.use_onnx = False
         self.session = None
         self.torch_model = None
+        self.native_imgsz = 640
 
         # Check if ONNX model is available or preferred
         onnx_candidate = None
@@ -102,13 +103,27 @@ class InsulationPipeDetector:
             opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             self.session = ort.InferenceSession(onnx_candidate, opts, providers=["CPUExecutionProvider"])
             self.input_name = self.session.get_inputs()[0].name
+            try:
+                shape = self.session.get_inputs()[0].shape
+                if len(shape) >= 4 and isinstance(shape[2], int) and shape[2] > 0:
+                    self.native_imgsz = int(shape[2])
+            except Exception:
+                pass
             self.use_onnx = True
         elif YOLO is not None and os.path.exists(model_path):
             self.torch_model = YOLO(model_path)
+            if "1024" in os.path.basename(model_path) or "yolov8m" in os.path.basename(model_path):
+                self.native_imgsz = 1024
             self.use_onnx = False
         elif os.path.exists(model_path) and model_path.endswith(".onnx") and ort is not None:
             self.session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
             self.input_name = self.session.get_inputs()[0].name
+            try:
+                shape = self.session.get_inputs()[0].shape
+                if len(shape) >= 4 and isinstance(shape[2], int) and shape[2] > 0:
+                    self.native_imgsz = int(shape[2])
+            except Exception:
+                pass
             self.use_onnx = True
         else:
             raise RuntimeError(
@@ -122,7 +137,7 @@ class InsulationPipeDetector:
         image_input: Union[str, np.ndarray],
         conf: float = 0.45,
         iou: float = 0.45,
-        imgsz: int = 640,
+        imgsz: Optional[int] = None,
         box_color: Tuple[int, int, int] = (0, 200, 255),
         line_width: int = 2
     ) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
@@ -133,7 +148,7 @@ class InsulationPipeDetector:
             image_input: File path string or RGB numpy array.
             conf: Confidence threshold (default 0.45).
             iou: IoU threshold for model NMS (default 0.45).
-            imgsz: Resolution for inference (default 640).
+            imgsz: Resolution for inference (default None -> auto-detected from model).
             box_color: BGR/RGB tuple for drawn boxes (default vibrant amber-gold).
             line_width: Thickness of bounding boxes.
 
@@ -142,6 +157,8 @@ class InsulationPipeDetector:
                 annotated_image: Image with clean boxes and total count badge.
                 detections: List of filtered pipe dicts with coordinates and confidence.
         """
+        if imgsz is None:
+            imgsz = getattr(self, "native_imgsz", 640)
         # Load image if file path, PIL Image, or numpy array
         if isinstance(image_input, str):
             bgr = cv2.imread(image_input)

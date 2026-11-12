@@ -9,7 +9,7 @@ import time
 import base64
 import io
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -62,22 +62,65 @@ def api_root():
         "health": "/api/health"
     }
 
-# Initialize detector with default production weights (prefer ONNX for ultra-lightweight serverless)
-ONNX_MODEL = BACKEND_DIR / "models" / "best_insulation_pipe_clean.onnx"
-PT_MODEL = BACKEND_DIR / "models" / "best_insulation_pipe_clean.pt"
-MODEL_PATH = str(ONNX_MODEL if ONNX_MODEL.exists() else PT_MODEL)
+# Model Architecture Registry
+# ACTIVE_MODEL_PROFILE: "yolov8m" (High accuracy, 1024px) or "yolov8n" (Ultra-fast baseline, 640px)
+# Can be changed here or set via PIPE_MODEL_PROFILE environment variable.
+ACTIVE_MODEL_PROFILE = os.environ.get("PIPE_MODEL_PROFILE", "yolov8m").lower().strip()
+
+MODEL_PROFILES = {
+    "yolov8m": {
+        "name": "YOLOv8 Medium (1024px, 98-99% accuracy target)",
+        "onnx": BACKEND_DIR / "models" / "best_insulation_pipe_m_1024.onnx",
+        "pt": BACKEND_DIR / "models" / "best_insulation_pipe_m_1024.pt",
+        "imgsz": 1024,
+    },
+    "yolov8n": {
+        "name": "YOLOv8 Nano (640px, lightweight baseline)",
+        "onnx": BACKEND_DIR / "models" / "best_insulation_pipe_clean.onnx",
+        "pt": BACKEND_DIR / "models" / "best_insulation_pipe_clean.pt",
+        "imgsz": 640,
+    }
+}
+
 SAMPLE_DIR = BACKEND_DIR / "sample_test"
 TEMP_VIDEO_DIR = BACKEND_DIR / "temp_videos"
 TEMP_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
 detector = None
+current_profile_in_use = None
 
-def get_detector() -> InsulationPipeDetector:
-    global detector
-    if detector is None:
-        if not os.path.exists(MODEL_PATH):
-            raise RuntimeError(f"Model file not found at {MODEL_PATH}")
-        detector = InsulationPipeDetector(MODEL_PATH)
+def resolve_model(profile_name: Optional[str] = None) -> Tuple[str, int, str]:
+    """
+    Resolve active model weights and input resolution.
+    Gracefully falls back to yolov8n baseline if yolov8m weights are not yet present.
+    """
+    target = (profile_name or ACTIVE_MODEL_PROFILE).lower().strip()
+    profile = MODEL_PROFILES.get(target, MODEL_PROFILES["yolov8m"])
+
+    # Check for target model weights (prefer ONNX)
+    if profile["onnx"].exists():
+        return str(profile["onnx"]), profile["imgsz"], target
+    if profile["pt"].exists():
+        return str(profile["pt"]), profile["imgsz"], target
+
+    # Seamless fallback to yolov8n baseline
+    baseline = MODEL_PROFILES["yolov8n"]
+    if baseline["onnx"].exists():
+        return str(baseline["onnx"]), baseline["imgsz"], "yolov8n"
+    if baseline["pt"].exists():
+        return str(baseline["pt"]), baseline["imgsz"], "yolov8n"
+
+    raise RuntimeError(f"No pipe detection weights found in {BACKEND_DIR / 'models'}")
+
+def get_detector(profile_name: Optional[str] = None) -> InsulationPipeDetector:
+    global detector, current_profile_in_use
+    target_profile = (profile_name or ACTIVE_MODEL_PROFILE).lower().strip()
+
+    if detector is None or (profile_name and profile_name != current_profile_in_use):
+        model_path, imgsz, actual_profile = resolve_model(target_profile)
+        detector = InsulationPipeDetector(model_path)
+        current_profile_in_use = actual_profile
+        print(f"[Model Registry] Active detector profile: {actual_profile} | Model: {model_path} | Native imgsz: {detector.native_imgsz}")
     return detector
 
 PRESET_CONFIGS = {
@@ -148,13 +191,63 @@ def decode_uploaded_image(file_bytes: bytes) -> np.ndarray:
 
 @app.get("/api/health")
 def health_check():
+    det = get_detector()
     return {
         "status": "online",
-        "model": "YOLOv8 Insulation Pipe Clean",
+        "model": f"YOLOv8 ({current_profile_in_use or ACTIVE_MODEL_PROFILE})",
+        "imgsz": det.native_imgsz,
+        "use_onnx": det.use_onnx,
         "supported_formats": [
             "jpg", "jpeg", "jfif", "gfif", "png", "webp",
             "bmp", "tiff", "tif", "gif", "avif", "ico"
         ]
+    }
+
+
+@app.get("/api/model/info")
+def get_model_info():
+    """Return currently active model profile, architecture details, and switchable profiles."""
+    det = get_detector()
+    return {
+        "active_profile": current_profile_in_use or ACTIVE_MODEL_PROFILE,
+        "configured_profile": ACTIVE_MODEL_PROFILE,
+        "native_imgsz": det.native_imgsz,
+        "model_path": det.model_path,
+        "use_onnx": det.use_onnx,
+        "available_profiles": {
+            k: {
+                "name": v["name"],
+                "installed": v["onnx"].exists() or v["pt"].exists(),
+                "imgsz": v["imgsz"],
+                "weights": str(v["onnx"] if v["onnx"].exists() else v["pt"]) if (v["onnx"].exists() or v["pt"].exists()) else None
+            }
+            for k, v in MODEL_PROFILES.items()
+        }
+    }
+
+
+@app.post("/api/model/switch")
+def switch_model_profile(profile: str = Form(...)):
+    """
+    Switch active model dynamically between 'yolov8m' and 'yolov8n' without server restart.
+    """
+    global ACTIVE_MODEL_PROFILE, detector, current_profile_in_use
+    target = profile.lower().strip()
+    if target not in MODEL_PROFILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown profile '{profile}'. Choose from: {list(MODEL_PROFILES.keys())}"
+        )
+
+    ACTIVE_MODEL_PROFILE = target
+    detector = None
+    new_det = get_detector(target)
+    return {
+        "success": True,
+        "requested_profile": target,
+        "active_profile": current_profile_in_use,
+        "native_imgsz": new_det.native_imgsz,
+        "model_path": new_det.model_path
     }
 
 
@@ -213,7 +306,7 @@ def process_image_bytes(
         rgb_img,
         conf=target_conf,
         iou=target_iou,
-        imgsz=640
+        imgsz=None
     )
     t_elapsed_ms = round((time.time() - t0) * 1000, 1)
 
@@ -378,7 +471,7 @@ async def detect_video(
                     rgb,
                     conf=target_conf,
                     iou=target_iou,
-                    imgsz=640
+                    imgsz=None
                 )
                 cnt = len(detections)
                 counts.append(cnt)
