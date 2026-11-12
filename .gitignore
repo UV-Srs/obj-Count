@@ -43,4 +43,8 @@ backend/temp_videos/
 yolov8m.pt
 yolov8n.pt
 
+# Large 1024px Medium weights (>100MB GitHub limit, kept locally in backend/models/)
+backend/models/best_insulation_pipe_m_1024.onnx
+backend/models/best_insulation_pipe_m_1024.pt
+
 
