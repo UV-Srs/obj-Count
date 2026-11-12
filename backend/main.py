@@ -11,7 +11,7 @@ import io
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, FileResponse
 from PIL import Image, ImageOps
@@ -227,16 +227,37 @@ def get_model_info():
 
 
 @app.post("/api/model/switch")
-def switch_model_profile(profile: str = Form(...)):
+async def switch_model_profile(
+    request: Request,
+    profile: Optional[str] = Form(None)
+):
     """
     Switch active model dynamically between 'yolov8m' and 'yolov8n' without server restart.
+    Accepts form data, JSON payload, or query parameter.
     """
     global ACTIVE_MODEL_PROFILE, detector, current_profile_in_use
-    target = profile.lower().strip()
+
+    target = profile
+    if not target:
+        target = request.query_params.get("profile")
+    if not target and request.headers.get("content-type", "").startswith("application/json"):
+        try:
+            body = await request.json()
+            target = body.get("profile")
+        except Exception:
+            pass
+
+    if not target:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing 'profile' parameter. Choose 'yolov8m' or 'yolov8n'."
+        )
+
+    target = target.lower().strip()
     if target not in MODEL_PROFILES:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown profile '{profile}'. Choose from: {list(MODEL_PROFILES.keys())}"
+            detail=f"Unknown profile '{target}'. Choose from: {list(MODEL_PROFILES.keys())}"
         )
 
     ACTIVE_MODEL_PROFILE = target
@@ -247,7 +268,8 @@ def switch_model_profile(profile: str = Form(...)):
         "requested_profile": target,
         "active_profile": current_profile_in_use,
         "native_imgsz": new_det.native_imgsz,
-        "model_path": new_det.model_path
+        "model_path": new_det.model_path,
+        "model_name": MODEL_PROFILES[target]["name"]
     }
 
 
@@ -342,7 +364,10 @@ def process_image_bytes(
             "image_width": w,
             "image_height": h,
             "conf_threshold": target_conf,
-            "preset": preset
+            "preset": preset,
+            "model_profile": current_profile_in_use or ACTIVE_MODEL_PROFILE,
+            "model_imgsz": det.native_imgsz,
+            "model_name": MODEL_PROFILES.get(current_profile_in_use or ACTIVE_MODEL_PROFILE, {}).get("name", "YOLOv8")
         },
         "annotated_image": annotated_b64,
         "detections": formatted_dets
@@ -515,6 +540,9 @@ async def detect_video(
                 "inference_time_ms": t_elapsed_ms,
                 "video_width": w,
                 "video_height": h,
+                "model_profile": current_profile_in_use or ACTIVE_MODEL_PROFILE,
+                "model_imgsz": det.native_imgsz,
+                "model_name": MODEL_PROFILES.get(current_profile_in_use or ACTIVE_MODEL_PROFILE, {}).get("name", "YOLOv8")
             },
             "video_url": f"/api/download-video/{video_id}",
             "annotated_image": peak_b64,

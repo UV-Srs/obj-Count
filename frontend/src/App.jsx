@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Upload,
   Download,
@@ -9,6 +9,10 @@ import {
   Layers,
   ImageIcon,
   Video,
+  Zap,
+  Cpu,
+  CheckCircle2,
+  RefreshCw,
 } from 'lucide-react';
 import './App.css';
 
@@ -18,6 +22,11 @@ export default function App() {
   const [activeMode, setActiveMode] = useState('image'); // 'image' | 'video'
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  // Model Engine State
+  const [activeModel, setActiveModel] = useState('yolov8m');
+  const [modelSwitching, setModelSwitching] = useState(false);
+  const [modelToast, setModelToast] = useState('');
 
   // Image Mode State
   const [originalImageSrc, setOriginalImageSrc] = useState(null);
@@ -34,6 +43,68 @@ export default function App() {
 
   const imageInputRef = useRef(null);
   const videoInputRef = useRef(null);
+
+  // Fetch initial active model from backend
+  useEffect(() => {
+    const fetchModelStatus = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/model/info`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.active_profile) {
+            setActiveModel(data.active_profile);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not query model status:', err);
+      }
+    };
+    fetchModelStatus();
+  }, []);
+
+  // Handle switching between YOLOv8m (1024px) and YOLOv8n (640px)
+  const handleModelSwitch = async (targetProfile) => {
+    if (targetProfile === activeModel || modelSwitching) return;
+    setModelSwitching(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('profile', targetProfile);
+
+      const res = await fetch(`${API_BASE}/api/model/switch`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Switch failed with status ${res.status}`);
+      }
+
+      const data = await res.json();
+      setActiveModel(data.active_profile);
+
+      const modelDisplayName =
+        data.active_profile === 'yolov8m'
+          ? 'YOLOv8 Medium (1024px, 99% Accuracy Engine)'
+          : 'YOLOv8 Nano (640px, Lightweight Baseline)';
+
+      setModelToast(`Switched active engine to: ${modelDisplayName}`);
+      setTimeout(() => setModelToast(''), 4500);
+
+      // If an image or video is already loaded, immediately re-run detection so user sees the new model's output!
+      if (activeMode === 'video' && activeVideoFile) {
+        processVideoFile(activeVideoFile);
+      } else if (activeMode === 'image' && activeImageFile) {
+        processImageFile(activeImageFile);
+      }
+    } catch (err) {
+      setError(`Failed to switch model: ${err.message}`);
+    } finally {
+      setModelSwitching(false);
+    }
+  };
 
   // Open native OS file manager based on current mode
   const handleOpenFileDialog = () => {
@@ -250,6 +321,24 @@ export default function App() {
             <span>Video Count</span>
           </button>
         </nav>
+
+        {/* Sidebar Engine Card */}
+        <div className="sidebar-engine-box">
+          <div className="engine-box-header">
+            <span className="engine-pulse-dot" />
+            <span className="engine-box-title">Engine Active</span>
+          </div>
+          <div className="engine-model-name">
+            {activeModel === 'yolov8m' ? 'YOLOv8 Medium' : 'YOLOv8 Nano'}
+          </div>
+          <div className="engine-model-detail">
+            <span>Input Size: </span>
+            <strong>{activeModel === 'yolov8m' ? '1024 × 1024' : '640 × 640'}</strong>
+          </div>
+          <div className="engine-model-sub">
+            {activeModel === 'yolov8m' ? '98-99% Accuracy Target' : 'Lightweight Fast Baseline'}
+          </div>
+        </div>
       </aside>
 
       {/* Main Viewport */}
@@ -266,16 +355,48 @@ export default function App() {
             </p>
           </div>
 
-          {currentResult && (
-            <button
-              type="button"
-              className="btn btn-upload-new"
-              onClick={handleOpenFileDialog}
-            >
-              <Upload size={15} />
-              <span>{isVideo ? 'Upload New Video' : 'Upload New Image'}</span>
-            </button>
-          )}
+          <div className="topbar-actions">
+            {/* Interactive Model Switcher Toggle */}
+            <div className="model-selector-wrapper">
+              <span className="model-selector-caption">AI Engine:</span>
+              <div className="model-selector-pills">
+                <button
+                  type="button"
+                  className={`model-pill ${activeModel === 'yolov8m' ? 'active' : ''}`}
+                  onClick={() => handleModelSwitch('yolov8m')}
+                  disabled={modelSwitching}
+                  title="Switch to YOLOv8 Medium (1024px, 98-99% accuracy)"
+                >
+                  <Zap size={14} className="pill-icon" />
+                  <span className="pill-title">YOLOv8m</span>
+                  <span className="pill-badge pill-badge-gold">1024px · 99%</span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`model-pill ${activeModel === 'yolov8n' ? 'active' : ''}`}
+                  onClick={() => handleModelSwitch('yolov8n')}
+                  disabled={modelSwitching}
+                  title="Switch to YOLOv8 Nano (640px lightweight baseline)"
+                >
+                  <Cpu size={14} className="pill-icon" />
+                  <span className="pill-title">YOLOv8n</span>
+                  <span className="pill-badge pill-badge-gray">640px · Fast</span>
+                </button>
+              </div>
+            </div>
+
+            {currentResult && (
+              <button
+                type="button"
+                className="btn btn-upload-new"
+                onClick={handleOpenFileDialog}
+              >
+                <Upload size={15} />
+                <span>{isVideo ? 'Upload New Video' : 'Upload New Image'}</span>
+              </button>
+            )}
+          </div>
         </header>
 
         <div className="page-body">
@@ -294,6 +415,22 @@ export default function App() {
             accept=".mp4,.avi,.mov,.mkv,.webm,video/*"
             onChange={handleVideoFileInput}
           />
+
+          {/* Model Switch Confirmation Notification */}
+          {modelToast && (
+            <div className="alert alert-success">
+              <CheckCircle2 size={18} />
+              <span>{modelToast}</span>
+            </div>
+          )}
+
+          {/* Model Switching Feedback */}
+          {modelSwitching && (
+            <div className="alert alert-info">
+              <RefreshCw size={18} className="spin-icon" />
+              <span>Switching detection engine and updating results...</span>
+            </div>
+          )}
 
           {/* Error Message */}
           {error && (
@@ -350,6 +487,15 @@ export default function App() {
                 <div className="stat-card primary-stat">
                   <span className="stat-label">Total Count</span>
                   <span className="stat-number">{currentResult.count}</span>
+                </div>
+
+                <div className="stat-card">
+                  <span className="stat-label">Model Architecture</span>
+                  <span className="stat-number stat-badge-text">
+                    {currentResult.metrics?.model_profile === 'yolov8n'
+                      ? 'YOLOv8n (640px)'
+                      : 'YOLOv8m (1024px)'}
+                  </span>
                 </div>
 
                 <div className="stat-card">
