@@ -124,10 +124,10 @@ def get_detector(profile_name: Optional[str] = None) -> InsulationPipeDetector:
     return detector
 
 PRESET_CONFIGS = {
-    "auto": {"conf": 0.35, "iou": 0.45, "name": "Auto (Optimized)"},
+    "auto": {"conf": 0.30, "iou": 0.45, "name": "Auto (Optimized)"},
     "grid": {"conf": 0.35, "iou": 0.45, "name": "Dense Touching Grid"},
-    "carton": {"conf": 0.58, "iou": 0.45, "name": "Warehouse Carton"},
-    "stack": {"conf": 0.45, "iou": 0.45, "name": "Standard Bundle / Stack"},
+    "carton": {"conf": 0.50, "iou": 0.45, "name": "Warehouse Carton"},
+    "stack": {"conf": 0.28, "iou": 0.45, "name": "Standard Bundle / Stack"},
 }
 
 SAMPLE_IMAGES = [

@@ -317,16 +317,24 @@ class InsulationPipeDetector:
                 (by2 < h_img * 0.22 and (bx2 - bx1) < 50 and (by2 - by1) < 50 and center_gray > outer_gray + 6)
             )
 
-            # 4. Worker skin tone check (must have bright outer gray, no dark hollow bore)
-            is_skin = False
-            if crop.ndim == 3 and crop.shape[2] == 3 and outer_gray > 85 and center_gray > 38:
-                crop_ycrcb = cv2.cvtColor(crop, cv2.COLOR_RGB2YCrCb)
-                cr = crop_ycrcb[:, :, 1]
-                cb = crop_ycrcb[:, :, 2]
-                skin_mask = (cr >= 135) & (cr <= 180) & (cb >= 85) & (cb <= 135)
-                is_skin = (np.mean(skin_mask) > 0.35 and ((by2 - by1) / max(1, bx2 - bx1) > 1.15))
+            # 4. Worker skin tone & head/clothing check (distractor rejection)
+            is_person = False
+            aspect = (by2 - by1) / max(1, bx2 - bx1)
+            if crop.ndim == 3 and crop.shape[2] == 3 and aspect > 1.15:
+                # 4a. Worker Face (skin tone + solid non-hollow center)
+                if outer_gray > 80 and center_gray > 50:
+                    crop_ycrcb = cv2.cvtColor(crop, cv2.COLOR_RGB2YCrCb)
+                    cr = crop_ycrcb[:, :, 1]
+                    cb = crop_ycrcb[:, :, 2]
+                    skin_mask = (cr >= 135) & (cr <= 180) & (cb >= 85) & (cb <= 135)
+                    if np.mean(skin_mask) > 0.18:
+                        is_person = True
 
-            if not (is_cardboard or is_shadow_void or is_watermark or is_skin):
+                # 4b. Worker Clothing (teal/cyan/blue shirt patch)
+                if not is_person and (b_val > r_val + 20 and g_val > r_val + 15):
+                    is_person = True
+
+            if not (is_cardboard or is_shadow_void or is_watermark or is_person):
                 valid_boxes.append(b)
 
         # Size outlier rejection
@@ -371,7 +379,7 @@ class InsulationPipeDetector:
                 ios = inter / area2
                 dist = math.hypot(c1x - c2x, c1y - c2y)
 
-                if (ios >= 0.50 and dist < max_dim1 * 0.45) or ios >= 0.75:
+                if (ios >= 0.45 and dist < max_dim1 * 0.48) or ios >= 0.70:
                     suppressed.add(j)
 
         remaining = [b for idx, b in enumerate(sorted_boxes) if idx not in suppressed]
