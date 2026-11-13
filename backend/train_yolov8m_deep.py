@@ -94,7 +94,7 @@ def run_deep_training(epochs: int = 25, batch: int = 2, imgsz: int = 1024, freez
 
         # Export ONNX
         print("\n⚡ Exporting optimized ONNX at 1024px...")
-        onnx_file = best_model.export(format="onnx", imgsz=imgsz, optimize=True, simplify=True)
+        onnx_file = best_model.export(format="onnx", imgsz=imgsz, simplify=True)
 
         # Copy to production models folder
         prod_pt = BACKEND_DIR / "models" / "best_insulation_pipe_m_1024.pt"
