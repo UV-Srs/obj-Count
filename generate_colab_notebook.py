@@ -1,0 +1,222 @@
+import json
+
+notebook = {
+    "nbformat": 4,
+    "nbformat_minor": 0,
+    "metadata": {
+        "colab": {
+            "name": "train_yolov8m_colab.ipynb",
+            "provenance": []
+        },
+        "kernelspec": {
+            "name": "python3",
+            "display_name": "Python 3"
+        },
+        "accelerator": "GPU"
+    },
+    "cells": [
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# 🚀 YOLOv8 Medium (1024px) High-Accuracy Training Pipeline\n",
+                "\n",
+                "This notebook trains **YOLOv8 Medium (`yolov8m.pt`)** with **1024x1024 input resolution** on a **Google Colab Tesla T4 GPU** to achieve **higher accuracy than the YOLOv8 Nano model**.\n",
+                "\n",
+                "---\n",
+                "### 📋 Instructions (3 Simple Steps):\n",
+                "1. **GPU Runtime**: Click **Runtime** > **Change runtime type** > Select **T4 GPU** > Click **Save**.\n",
+                "2. **Upload Dataset**: Drag & drop **`pipe_dataset_colab.zip`** into the Colab **Files** panel on the left.\n",
+                "3. **Run All**: Click **Runtime** > **Run all** (or press `Ctrl + F9`).\n",
+                "\n",
+                "The notebook will train the model, benchmark accuracy, export the 1024px ONNX, and **automatically download** both files to your computer when finished!"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "metadata": {},
+            "execution_count": None,
+            "outputs": [],
+            "source": [
+                "# Cell 1: Environment & GPU Verification\n",
+                "!nvidia-smi\n",
+                "!pip install -q ultralytics onnx onnxruntime opencv-python matplotlib\n",
+                "\n",
+                "import os, sys, shutil, zipfile, time, glob\n",
+                "import torch\n",
+                "from ultralytics import YOLO\n",
+                "\n",
+                "print(f\"PyTorch Version : {torch.__version__}\")\n",
+                "print(f\"CUDA Available  : {torch.cuda.is_available()}\")\n",
+                "if torch.cuda.is_available():\n",
+                "    print(f\"GPU Device Name : {torch.cuda.get_device_name(0)}\")\n",
+                "    print(f\"GPU Memory      : {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB\")\n",
+                "else:\n",
+                "    print(\"⚠️ Warning: GPU not detected! Go to Runtime > Change runtime type > Select T4 GPU.\")\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "metadata": {},
+            "execution_count": None,
+            "outputs": [],
+            "source": [
+                "# Cell 2: Unzip Master Dataset\n",
+                "DATA_ZIP = \"/content/pipe_dataset_colab.zip\"\n",
+                "DATA_DIR = \"/content/data\"\n",
+                "\n",
+                "if not os.path.exists(DATA_ZIP):\n",
+                "    raise FileNotFoundError(\"❌ /content/pipe_dataset_colab.zip not found! Please upload pipe_dataset_colab.zip to the Files tab on the left.\")\n",
+                "\n",
+                "if os.path.exists(DATA_DIR):\n",
+                "    shutil.rmtree(DATA_DIR)\n",
+                "os.makedirs(DATA_DIR, exist_ok=True)\n",
+                "\n",
+                "with zipfile.ZipFile(DATA_ZIP, \"r\") as z:\n",
+                "    z.extractall(DATA_DIR)\n",
+                "\n",
+                "train_n = len(os.listdir(os.path.join(DATA_DIR, \"images/train\")))\n",
+                "val_n = len(os.listdir(os.path.join(DATA_DIR, \"images/val\")))\n",
+                "print(\"✅ Purified Master Dataset Extracted!\")\n",
+                "print(f\"   Train images : {train_n}\")\n",
+                "print(f\"   Val images   : {val_n}\")\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "metadata": {},
+            "execution_count": None,
+            "outputs": [],
+            "source": [
+                "# Cell 3: Train YOLOv8 Medium (1024px) for Peak Accuracy\n",
+                "# Starts from yolov8m.pt base architecture (25.8 million parameters)\n",
+                "model = YOLO('yolov8m.pt')\n",
+                "\n",
+                "TRAIN_CONFIG = {\n",
+                "    \"data\": \"/content/data/data.yaml\",\n",
+                "    \"epochs\": 60,               # Deep multi-epoch convergence\n",
+                "    \"patience\": 20,              # Ample patience to pass loss plateaus\n",
+                "    \"imgsz\": 1024,               # 1024x1024 high resolution\n",
+                "    \"batch\": 8,                  # Optimal for T4 16GB VRAM\n",
+                "    \"device\": 0,                 # CUDA GPU\n",
+                "    \"optimizer\": \"AdamW\",        # Adaptive momentum\n",
+                "    \"lr0\": 0.0003,               # Stable fine-tuning rate\n",
+                "    \"lrf\": 0.01,                 # Cosine learning rate floor\n",
+                "    \"cos_lr\": True,              # Smooth cosine annealing scheduler\n",
+                "    \"box\": 7.5,                  # High bounding box loss weight\n",
+                "    \"cls\": 1.5,                  # Suppresses background false positives\n",
+                "    \"dfl\": 1.5,                  # Distribution focal loss\n",
+                "    \"degrees\": 15.0,             # Rotational invariance for angled pipes\n",
+                "    \"translate\": 0.1,            # Translation jitter\n",
+                "    \"scale\": 0.6,                # Scale invariance (near vs far)\n",
+                "    \"fliplr\": 0.5,               # Horizontal flip\n",
+                "    \"flipud\": 0.2,               # Vertical flip\n",
+                "    \"mosaic\": 1.0,               # 4-image mosaic for dense pipe scenes\n",
+                "    \"mixup\": 0.15,               # Mixup for overlapping pipes\n",
+                "    \"close_mosaic\": 15,          # Disables mosaic during final 15 epochs for clean natural edges\n",
+                "    \"save\": True,\n",
+                "    \"project\": \"pipe_training\",\n",
+                "    \"name\": \"yolov8m_1024_accuracy\"\n",
+                "}\n",
+                "\n",
+                "print(\"=\"*70)\n",
+                "print(\"🚀 STARTING YOLOV8M (1024px) DEEP TRAINING ON GPU\")\n",
+                "print(\"=\"*70)\n",
+                "t0 = time.time()\n",
+                "results = model.train(**TRAIN_CONFIG)\n",
+                "elapsed = (time.time() - t0) / 60.0\n",
+                "print(f\"\\n✅ Training completed in {elapsed:.1f} minutes!\")\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "metadata": {},
+            "execution_count": None,
+            "outputs": [],
+            "source": [
+                "# Cell 4: Validation & Accuracy Metrics Evaluation\n",
+                "best_weights = glob.glob(\"/content/pipe_training/yolov8m_1024_accuracy*/weights/best.pt\")[-1]\n",
+                "print(f\"🎯 Evaluating Best Model: {best_weights}\")\n",
+                "best_model = YOLO(best_weights)\n",
+                "\n",
+                "metrics = best_model.val(data=\"/content/data/data.yaml\", imgsz=1024, device=0)\n",
+                "\n",
+                "p = metrics.box.p[0] * 100.0\n",
+                "r = metrics.box.r[0] * 100.0\n",
+                "map50 = metrics.box.map50 * 100.0\n",
+                "map95 = metrics.box.map * 100.0\n",
+                "f1 = 2 * (p * r) / (p + r + 1e-16)\n",
+                "\n",
+                "print(\"\\n\" + \"=\"*60)\n",
+                "print(\"🎯 FINAL YOLOV8M VALIDATION ACCURACY:\")\n",
+                "print(f\"   Precision (P) : {p:.2f}%\")\n",
+                "print(f\"   Recall (R)    : {r:.2f}%\")\n",
+                "print(f\"   mAP@50        : {map50:.2f}%\")\n",
+                "print(f\"   mAP@50-95     : {map95:.2f}%\")\n",
+                "print(f\"   F1-Score      : {f1:.2f}%\")\n",
+                "print(\"=\"*60)\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "metadata": {},
+            "execution_count": None,
+            "outputs": [],
+            "source": [
+                "# Cell 5: Multi-Scenario Benchmark Suite\n",
+                "candidates = [\n",
+                "    (\"70-Pipe Grid Carton\", \"/content/data/sample_test/box_touching_grid_70.jpg\", 0.35, 70),\n",
+                "    (\"Multi-Layer Stack\", \"/content/data/sample_test/pipe_stack_dreamstime.jpg\", 0.28, 29),\n",
+                "    (\"Warehouse Box Carton\", \"/content/data/sample_test/warehouse_box_uploaded.jpg\", 0.50, 58),\n",
+                "    (\"6-Pipe Pyramid Bundle\", \"/content/data/sample_test/crop_6_pipes.jpg\", 0.28, 6),\n",
+                "    (\"Loose Deformed Pipes\", \"/content/data/sample_test/box_deformed_pipes_clean.jpg\", 0.35, 48),\n",
+                "]\n",
+                "\n",
+                "print(\"=\"*70)\n",
+                "print(\"🧪 MULTI-SCENARIO BENCHMARK VERIFICATION\")\n",
+                "print(\"=\"*70)\n",
+                "for title, fpath, conf_val, expected in candidates:\n",
+                "    if os.path.exists(fpath):\n",
+                "        res = best_model.predict(source=fpath, conf=conf_val, imgsz=1024, verbose=False)[0]\n",
+                "        det_count = len(res.boxes)\n",
+                "        acc_pct = (1.0 - abs(det_count - expected) / float(expected)) * 100.0\n",
+                "        print(f\"  {title:25s} | Detected: {det_count:3d} / {expected:3d} ({acc_pct:.1f}% accuracy)\")\n",
+                "    else:\n",
+                "        print(f\"  {title:25s} | File not found at {fpath}\")\n",
+                "print(\"=\"*70)\n"
+            ]
+        },
+        {
+            "cell_type": "code",
+            "metadata": {},
+            "execution_count": None,
+            "outputs": [],
+            "source": [
+                "# Cell 6: Export to 1024px ONNX & Download Both Models\n",
+                "from google.colab import files\n",
+                "\n",
+                "print(\"⚡ Exporting refined model to 1024px ONNX...\")\n",
+                "onnx_path = best_model.export(format=\"onnx\", imgsz=1024, simplify=True)\n",
+                "\n",
+                "pt_dst = \"/content/best_insulation_pipe_m_1024.pt\"\n",
+                "onnx_dst = \"/content/best_insulation_pipe_m_1024.onnx\"\n",
+                "\n",
+                "shutil.copy(best_weights, pt_dst)\n",
+                "shutil.copy(onnx_path, onnx_dst)\n",
+                "\n",
+                "print(\"\\n⬇️ Downloading best_insulation_pipe_m_1024.pt (PyTorch weights, ~52 MB)...\")\n",
+                "files.download(pt_dst)\n",
+                "\n",
+                "print(\"⬇️ Downloading best_insulation_pipe_m_1024.onnx (1024px ONNX engine, ~104 MB)...\")\n",
+                "files.download(onnx_dst)\n",
+                "\n",
+                "print(\"\\n🎉 Training Complete! Move the 2 downloaded files into c:\\\\AI\\\\backend\\\\models\\\\ on your PC!\")\n"
+            ]
+        }
+    ]
+}
+
+for dest in ["c:/AI/train_yolov8m_colab.ipynb", "c:/AI/backend/train_yolov8m_colab.ipynb"]:
+    with open(dest, "w", encoding="utf-8") as fp:
+        json.dump(notebook, fp, indent=2)
+    print(f"✅ Generated Colab Notebook at: {dest}")
