@@ -90,30 +90,45 @@ Or import the GitHub repository into your Vercel Dashboard.
 ## 📁 Repository Structure
 
 ```
-c:\AI\
+├── data/
+│   ├── images/
+│   │   ├── train/               # 633 Training images (529 Pipes + 104 Negatives)
+│   │   └── val/                 # 104 Validation images (75 Pipes + 29 Negatives)
+│   ├── labels/
+│   │   ├── train/               # Clean YOLO annotations (0-byte files for negatives)
+│   │   └── val/                 # Clean YOLO validation annotations
+│   ├── data.yaml                # Standardized YOLO dataset configuration
+│   └── pipe_dataset_colab.zip   # Full dataset archive for cloud GPU training
+│
 ├── backend/
-│   ├── main.py                  # FastAPI server with /api/detect & /api/health
-│   ├── insulation_detector.py   # ONNX Runtime & PyTorch inference engine
-│   ├── concentric_nms.py        # 4-pass anti-double & distractor filter
-│   ├── requirements.txt         # Lightweight serverless dependencies (onnxruntime)
+│   ├── main.py                  # FastAPI server with /api/detect, /api/samples & /api/health
+│   ├── insulation_detector.py   # ONNX Runtime & PyTorch inference engine with IoS suppression
+│   ├── train_yolov8m_deep.py    # Local deep training script
+│   ├── train.py                 # Multi-epoch fine-tuning entrypoint
+│   ├── requirements.txt         # Production backend dependencies (onnxruntime, fastapi, opencv)
 │   ├── run_backend.bat          # One-click backend launcher
+│   ├── sample_test/             # Sample images served to web UI
 │   └── models/
-│       ├── best_insulation_pipe_clean.onnx  # Production ONNX model (12 MB)
-│       └── best_insulation_pipe_clean.pt    # PyTorch model weights
+│       ├── best_insulation_pipe_m_1024.onnx # Active 1024px Medium ONNX model (103.9 MB)
+│       ├── best_insulation_pipe_m_1024.pt   # Active 1024px Medium PyTorch weights (52.0 MB)
+│       ├── best_insulation_pipe_clean.onnx  # Baseline Nano ONNX model (12 MB)
+│       └── best_insulation_pipe_clean.pt    # Baseline Nano PyTorch weights (6.5 MB)
 │
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx              # Dashboard UI (drag-and-drop, stacked results)
-│   │   ├── App.css              # Clean industrial dashboard styling
+│   │   ├── App.jsx              # Modern industrial pipe detection dashboard
+│   │   ├── App.css              # Custom responsive styling
 │   │   └── main.jsx             # React entrypoint
 │   ├── package.json             # React 19 & Vite dependencies
 │   ├── vite.config.js           # Vite config with API reverse proxy
 │   └── run_frontend.bat         # One-click frontend launcher
 │
+├── train_yolov8m_colab.ipynb    # Google Colab GPU training notebook (One-Click)
 ├── run_all.bat                  # Concurrently launches backend & frontend
 ├── run_backend.bat              # Root launcher for backend
 ├── run_frontend.bat             # Root launcher for frontend
 ├── vercel.json                  # Vercel multi-service routing configuration
+├── requirements.txt             # Project root dependencies
 └── README.md                    # Project documentation
 ```
 

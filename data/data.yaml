@@ -1,0 +1,7 @@
+# Dataset configuration for Insulation Pipe Detection
+path: data
+train: images/train
+val: images/val
+
+nc: 1
+names: ['insulation_pipe']

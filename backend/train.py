@@ -24,9 +24,10 @@ def extract_loss_val(container, key, default_idx=0):
     return 0.0
 
 def main():
+    default_data = "data/data.yaml" if os.path.exists("data/data.yaml") else ("../data/data.yaml" if os.path.exists("../data/data.yaml") else "data.yaml")
     parser = argparse.ArgumentParser(description="Train / Fine-Tune YOLOv8 for Insulation Pipe Detection")
     parser.add_argument("--model", type=str, default="models/best_insulation_pipe.pt", help="Path to initial weights")
-    parser.add_argument("--data", type=str, default="data/data.yaml", help="Path to data.yaml")
+    parser.add_argument("--data", type=str, default=default_data, help="Path to data.yaml")
     parser.add_argument("--epochs", type=int, default=25, help="Number of training epochs")
     parser.add_argument("--imgsz", type=int, default=640, help="Image resolution (640, 960, or 1280)")
     parser.add_argument("--batch", type=int, default=4, help="Batch size")

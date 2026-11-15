@@ -135,7 +135,7 @@ class InsulationPipeDetector:
     def detect(
         self,
         image_input: Union[str, np.ndarray],
-        conf: float = 0.45,
+        conf: float = 0.25,
         iou: float = 0.45,
         imgsz: Optional[int] = None,
         box_color: Tuple[int, int, int] = (0, 200, 255),
@@ -146,7 +146,7 @@ class InsulationPipeDetector:
 
         Args:
             image_input: File path string or RGB numpy array.
-            conf: Confidence threshold (default 0.45).
+            conf: Confidence threshold (default 0.25).
             iou: IoU threshold for model NMS (default 0.45).
             imgsz: Resolution for inference (default None -> auto-detected from model).
             box_color: BGR/RGB tuple for drawn boxes (default vibrant amber-gold).
@@ -273,78 +273,38 @@ class InsulationPipeDetector:
         boxes: List[Dict[str, Any]],
         image_rgb: np.ndarray
     ) -> List[Dict[str, Any]]:
-        """Integrated 4-pass filter engine."""
+        """
+        Pure geometric post-processing engine:
+        1. Aspect Ratio & Dimension Sanity Filter (removes non-pipe slivers/stripes).
+        2. Concentric Inner Bore Suppression (IoS) - suppresses inner hole duplicates.
+        3. Axial Body Duplicate Suppression - suppresses long side cylinder bodies overlapping circular faces.
+        """
         if not boxes:
             return []
 
         h_img, w_img = image_rgb.shape[:2]
 
-        # Pass 0: Cardboard & Distractor Rejection
+        # Pass 0: Aspect ratio & dimension sanity filter
         valid_boxes = []
         for b in boxes:
             bx1, by1, bx2, by2 = b["x1"], b["y1"], b["x2"], b["y2"]
-            if (bx2 - bx1) < 6 or (by2 - by1) < 6:
-                valid_boxes.append(b)
+            box_w = bx2 - bx1
+            box_h = by2 - by1
+            if box_w < 6 or box_h < 6:
                 continue
 
-            crop = image_rgb[by1:by2, bx1:bx2]
-            top = crop[:max(2, crop.shape[0] // 5), :]
-            bot = crop[-max(2, crop.shape[0] // 5):, :]
-            left = crop[:, :max(2, crop.shape[1] // 5)]
-            right = crop[:, -max(2, crop.shape[1] // 5):]
-            outer = np.concatenate([top.reshape(-1, 3), bot.reshape(-1, 3), left.reshape(-1, 3), right.reshape(-1, 3)], axis=0)
-            mean_c = np.mean(outer, axis=0)
-            r_val, g_val, b_val = mean_c[0], mean_c[1], mean_c[2]
-            outer_gray = float(np.mean(mean_c))
+            aspect = box_h / max(1.0, box_w)
+            # Pipe cross sections (even squashed or oval) have aspect ratio between 0.35 and 2.85
+            if aspect > 2.85 or aspect < 0.35:
+                continue
 
-            cx1, cy1 = max(0, (bx2 - bx1) // 3), max(0, (by2 - by1) // 3)
-            cx2, cy2 = min((bx2 - bx1), (bx2 - bx1) - cx1), min((by2 - by1), (by2 - by1) - cy1)
-            center_crop = crop[cy1:cy2, cx1:cx2]
-            center_gray = float(np.mean(center_crop)) if center_crop.size > 0 else outer_gray
+            valid_boxes.append(b)
 
-            # 1. Kraft cardboard brown check
-            is_cardboard = (
-                (r_val > 135 and (r_val - b_val) > 35 and (g_val - b_val) > 15) or
-                (r_val / max(1.0, b_val) > 1.45 and g_val / max(1.0, b_val) > 1.18 and r_val > 70)
-            )
-
-            # 2. Dark shadow void check
-            is_shadow_void = (outer_gray < 30 and center_gray < 25)
-
-            # 3. Watermark check
-            is_watermark = (
-                (center_gray > outer_gray + 10 and outer_gray < 35 and ((bx2 - bx1) < 55 or (by2 - by1) < 55)) or
-                (by2 < h_img * 0.22 and (bx2 - bx1) < 50 and (by2 - by1) < 50 and center_gray > outer_gray + 6)
-            )
-
-            # 4. Worker skin tone & head/clothing check (distractor rejection)
-            is_person = False
-            aspect = (by2 - by1) / max(1, bx2 - bx1)
-            if crop.ndim == 3 and crop.shape[2] == 3 and aspect > 1.15:
-                # 4a. Worker Face (skin tone + solid non-hollow center)
-                if outer_gray > 80 and center_gray > 50:
-                    crop_ycrcb = cv2.cvtColor(crop, cv2.COLOR_RGB2YCrCb)
-                    cr = crop_ycrcb[:, :, 1]
-                    cb = crop_ycrcb[:, :, 2]
-                    skin_mask = (cr >= 135) & (cr <= 180) & (cb >= 85) & (cb <= 135)
-                    if np.mean(skin_mask) > 0.18:
-                        is_person = True
-
-                # 4b. Worker Clothing (teal/cyan/blue shirt patch)
-                if not is_person and (b_val > r_val + 20 and g_val > r_val + 15):
-                    is_person = True
-
-            if not (is_cardboard or is_shadow_void or is_watermark or is_person):
-                valid_boxes.append(b)
-
-        # Size outlier rejection
-        if len(valid_boxes) >= 6:
-            widths = [(b["x2"] - b["x1"]) for b in valid_boxes]
-            med_w = float(np.median(widths))
-            if med_w >= 18:
-                valid_boxes = [b for b in valid_boxes if (b["x2"] - b["x1"]) >= med_w * 0.42]
+        if not valid_boxes:
+            return []
 
         # Pass 1: Concentric Inner Bore Suppression (IoS)
+        # Sort by area descending so outer tube is checked against inner bore
         sorted_boxes = sorted(valid_boxes, key=lambda b: (b["x2"] - b["x1"]) * (b["y2"] - b["y1"]), reverse=True)
         suppressed = set()
         n = len(sorted_boxes)
@@ -379,19 +339,20 @@ class InsulationPipeDetector:
                 ios = inter / area2
                 dist = math.hypot(c1x - c2x, c1y - c2y)
 
+                # If smaller box is substantially inside larger box and centers are close -> inner bore
                 if (ios >= 0.45 and dist < max_dim1 * 0.48) or ios >= 0.70:
                     suppressed.add(j)
 
         remaining = [b for idx, b in enumerate(sorted_boxes) if idx not in suppressed]
 
-        # Pass 2: Axial Cylinder Body Suppression
+        # Pass 2: Axial Cylinder Body Suppression (suppresses elongated body when circular face exists)
         if len(remaining) > 1:
             circular_faces = []
             for b in remaining:
                 bw = max(1.0, b["x2"] - b["x1"])
                 bh = max(1.0, b["y2"] - b["y1"])
                 ar = bh / bw
-                if 0.52 <= ar <= 1.82:
+                if 0.55 <= ar <= 1.80:
                     circular_faces.append(b)
 
             if len(circular_faces) >= 2:
@@ -400,7 +361,7 @@ class InsulationPipeDetector:
                     bw = max(1.0, b["x2"] - b["x1"])
                     bh = max(1.0, b["y2"] - b["y1"])
                     ar = bh / bw
-                    if ar > 1.85 or ar < 0.50:
+                    if ar > 2.0 or ar < 0.45:
                         is_duplicate_body = False
                         for cf in circular_faces:
                             cfw = max(1.0, cf["x2"] - cf["x1"])
@@ -415,26 +376,5 @@ class InsulationPipeDetector:
                     else:
                         body_filtered.append(b)
                 remaining = body_filtered
-
-        # Pass 3: Spatial Isolation Outlier Filter
-        if len(remaining) >= 8:
-            widths = [(b["x2"] - b["x1"]) for b in remaining]
-            med_w = float(np.median(widths))
-            clustered = []
-            for i, b in enumerate(remaining):
-                cx = (b["x1"] + b["x2"]) / 2.0
-                cy = (b["y1"] + b["y2"]) / 2.0
-                min_dist = float('inf')
-                for j, other in enumerate(remaining):
-                    if i == j:
-                        continue
-                    ocx = (other["x1"] + other["x2"]) / 2.0
-                    ocy = (other["y1"] + other["y2"]) / 2.0
-                    d = math.hypot(cx - ocx, cy - ocy)
-                    if d < min_dist:
-                        min_dist = d
-                if min_dist <= med_w * 2.8:
-                    clustered.append(b)
-            remaining = clustered
 
         return remaining

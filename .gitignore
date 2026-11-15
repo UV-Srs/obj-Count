@@ -31,13 +31,17 @@ venv/
 Thumbs.db
 desktop.ini
 
-# Intermediate training runs (weights are saved in backend/models/)
+# Intermediate training runs & caches
 runs/
 backend/runs/
 
 # Temporary video processing cache
 temp_videos/
 backend/temp_videos/
+
+# Large archives (>100MB GitHub limit)
+*.zip
+data/*.zip
 
 # Base pretrained weights (downloaded on demand)
 yolov8m.pt
@@ -46,5 +50,3 @@ yolov8n.pt
 # Large 1024px Medium weights (>100MB GitHub limit, kept locally in backend/models/)
 backend/models/best_insulation_pipe_m_1024.onnx
 backend/models/best_insulation_pipe_m_1024.pt
-
-
