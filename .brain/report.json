@@ -1,0 +1,63 @@
+{
+  "schema_version": "1.2",
+  "project": "object-count",
+  "push_count": 0,
+  "memories_stored": 4,
+  "memories_retrieved": 0,
+  "utilisation_rate": 0.0,
+  "quality_score": 1.0,
+  "memory_types": {
+    "business_rule": 0,
+    "decision": 3,
+    "constraint": 1,
+    "failure": 0,
+    "intent": 0,
+    "tradeoff": 0,
+    "debt": 0
+  },
+  "stage1_count": 4,
+  "stage2_count": 0,
+  "total_extracted": 4,
+  "stale_count": 0,
+  "provider": "unknown",
+  "risk": {
+    "critical": 0,
+    "high": 1,
+    "medium": 3
+  },
+  "debt": {
+    "design": 0,
+    "defect": 0,
+    "documentation": 0,
+    "requirement": 0,
+    "test": 0
+  },
+  "decision_debt": 3,
+  "incidents": 0,
+  "enforced": 3,
+  "documented": 0,
+  "subsystems": [
+    {
+      "name": "(repo-wide)",
+      "items": 3,
+      "critical": 0,
+      "incidents": 0
+    },
+    {
+      "name": "backend",
+      "items": 1,
+      "critical": 0,
+      "incidents": 0
+    }
+  ],
+  "coverage": {
+    "measured": true,
+    "product_files": 98,
+    "uncovered_files": 14,
+    "uncovered_share": 14,
+    "blind_spots": 2,
+    "covered_subsystems": 2,
+    "total_subsystems": 4,
+    "rules_per_100_files": 4.1
+  }
+}

@@ -1,0 +1,51 @@
+[
+  {
+    "text": "lightweight onnxruntime engine to resolve LAMBDA_SIZE_EXCEEDED",
+    "rationale": "",
+    "files": [],
+    "confidence": 0.88,
+    "source": "commit_message",
+    "source_file": "",
+    "rejected_alternative": "",
+    "scope": "vercel",
+    "_author": "UV-Srs",
+    "_commit": "ac14cb8889fd",
+    "_quality": 0.584,
+    "_captured_at": "2026-11-13T12:20:09.460021+00:00",
+    "_captured_by": "maneesh-kumar-thakur",
+    "_kind": "decision",
+    "id": "ca664cbed8b9"
+  },
+  {
+    "text": "services.frontend.framework is set to vite",
+    "rationale": "",
+    "files": [
+      "vercel.json"
+    ],
+    "confidence": 0.85,
+    "source": "config",
+    "source_file": "vercel.json",
+    "rejected_alternative": "",
+    "_quality": 0.5825,
+    "_captured_at": "2026-11-13T12:20:09.717884+00:00",
+    "_captured_by": "maneesh-kumar-thakur",
+    "_kind": "decision",
+    "id": "a7ee39fea2eb"
+  },
+  {
+    "text": "services.backend.framework is set to fastapi",
+    "rationale": "",
+    "files": [
+      "vercel.json"
+    ],
+    "confidence": 0.85,
+    "source": "config",
+    "source_file": "vercel.json",
+    "rejected_alternative": "",
+    "_quality": 0.5825,
+    "_captured_at": "2026-11-13T12:20:09.717884+00:00",
+    "_captured_by": "maneesh-kumar-thakur",
+    "_kind": "decision",
+    "id": "955451b2c2a9"
+  }
+]

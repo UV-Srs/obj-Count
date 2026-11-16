@@ -1,0 +1,19 @@
+[
+  {
+    "text": "Sample file missing from disk",
+    "rationale": "",
+    "files": [
+      "backend/main.py"
+    ],
+    "confidence": 0.85,
+    "source": "code_pattern",
+    "source_file": "backend/main.py",
+    "_line": 293,
+    "severity": "high",
+    "_quality": 0.5125,
+    "_captured_at": "2026-11-13T12:20:11.090230+00:00",
+    "_captured_by": "maneesh-kumar-thakur",
+    "_kind": "constraint",
+    "id": "1ff389a44395"
+  }
+]
