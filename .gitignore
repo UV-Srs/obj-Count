@@ -42,6 +42,7 @@ backend/temp_videos/
 # Large archives (>100MB GitHub limit)
 *.zip
 data/*.zip
+data_incoming_64/
 
 # Base pretrained weights (downloaded on demand)
 yolov8m.pt
