@@ -44,6 +44,14 @@ app = FastAPI(
     openapi_url="/api/openapi.json"
 )
 
+# Upload limits (protects server memory and blocks accidental massive uploads)
+MAX_IMAGE_SIZE_MB = 25
+MAX_IMAGE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024
+MAX_VIDEO_SIZE_MB = 100
+MAX_VIDEO_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".jfif", ".gfif", ".png", ".webp", ".bmp", ".tiff", ".tif"}
+ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
+
 # Enable CORS for React frontend (Vite default is 5173, CRA is 3000)
 app.add_middleware(
     CORSMiddleware,
@@ -69,13 +77,13 @@ ACTIVE_MODEL_PROFILE = os.environ.get("PIPE_MODEL_PROFILE", "yolov8m").lower().s
 
 MODEL_PROFILES = {
     "yolov8m": {
-        "name": "YOLOv8 Medium (1024px, 98-99% accuracy target)",
+        "name": "YOLOv8 Medium (1024px)",
         "onnx": BACKEND_DIR / "models" / "best_insulation_pipe_m_1024.onnx",
         "pt": BACKEND_DIR / "models" / "best_insulation_pipe_m_1024.pt",
         "imgsz": 1024,
     },
     "yolov8n": {
-        "name": "YOLOv8 Nano (640px, lightweight baseline)",
+        "name": "YOLOv8 Nano (640px)",
         "onnx": BACKEND_DIR / "models" / "best_insulation_pipe_clean.onnx",
         "pt": BACKEND_DIR / "models" / "best_insulation_pipe_clean.pt",
         "imgsz": 640,
@@ -124,10 +132,12 @@ def get_detector(profile_name: Optional[str] = None) -> InsulationPipeDetector:
     return detector
 
 PRESET_CONFIGS = {
-    "auto": {"conf": 0.30, "iou": 0.45, "name": "Auto (Optimized)"},
-    "grid": {"conf": 0.35, "iou": 0.45, "name": "Dense Touching Grid"},
-    "carton": {"conf": 0.50, "iou": 0.45, "name": "Warehouse Carton"},
-    "stack": {"conf": 0.28, "iou": 0.45, "name": "Standard Bundle / Stack"},
+    "auto": {"conf": 0.20, "iou": 0.45, "name": "Auto (Optimized)"},
+    "grid": {"conf": 0.20, "iou": 0.45, "name": "Dense Touching Grid"},
+    "carton": {"conf": 0.22, "iou": 0.45, "name": "Warehouse Carton"},
+    "stack": {"conf": 0.20, "iou": 0.45, "name": "Standard Bundle / Stack"},
+    "metal_dense": {"conf": 0.20, "iou": 0.45, "name": "Dense Steel & Scaffolding"},
+    "strict": {"conf": 0.35, "iou": 0.45, "name": "Strict High-Precision"},
 }
 
 SAMPLE_IMAGES = [
@@ -305,6 +315,16 @@ def process_image_bytes(
     iou: Optional[float] = None
 ) -> Dict[str, Any]:
     """Core detection logic on raw image bytes."""
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Empty file bytes")
+
+    # Enforce image upload limit (25 MB)
+    if len(file_bytes) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image size ({len(file_bytes) / (1024 * 1024):.1f} MB) exceeds maximum allowed limit of {MAX_IMAGE_SIZE_MB} MB."
+        )
+
     det = get_detector()
 
     # Determine confidence threshold
@@ -315,9 +335,6 @@ def process_image_bytes(
         target_conf = cfg["conf"]
     if target_iou is None or target_iou <= 0:
         target_iou = 0.45
-
-    if not file_bytes:
-        raise HTTPException(status_code=400, detail="Empty file bytes")
 
     rgb_img = decode_uploaded_image(file_bytes)
     h, w = rgb_img.shape[:2]
@@ -384,7 +401,16 @@ async def detect_pipes(
     """
     Detect insulation pipes in an uploaded image.
     Supports all formats (.jfif, .gfif, .webp, .png, .jpg, .bmp, .tiff, .gif).
+    Enforces 25 MB file size limit.
     """
+    if file.filename:
+        ext = Path(file.filename).suffix.lower()
+        if ext and ext not in ALLOWED_IMAGE_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported format '{ext}'. Allowed formats: {', '.join(sorted(ALLOWED_IMAGE_EXTENSIONS))}"
+            )
+
     file_bytes = await file.read()
     return process_image_bytes(
         file_bytes=file_bytes,
@@ -445,9 +471,23 @@ async def detect_video(
     if target_iou is None or target_iou <= 0:
         target_iou = 0.45
 
+    if file.filename:
+        ext = Path(file.filename).suffix.lower()
+        if ext and ext not in ALLOWED_VIDEO_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported video format '{ext}'. Allowed formats: {', '.join(sorted(ALLOWED_VIDEO_EXTENSIONS))}"
+            )
+
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Empty video file")
+
+    if len(file_bytes) > MAX_VIDEO_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Video size ({len(file_bytes) / (1024 * 1024):.1f} MB) exceeds maximum allowed limit of {MAX_VIDEO_SIZE_MB} MB."
+        )
 
     video_id = str(uuid.uuid4())
     in_temp = TEMP_VIDEO_DIR / f"in_{video_id}.mp4"

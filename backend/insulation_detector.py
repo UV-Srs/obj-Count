@@ -135,11 +135,14 @@ class InsulationPipeDetector:
     def detect(
         self,
         image_input: Union[str, np.ndarray],
-        conf: float = 0.25,
+        conf: float = 0.20,
         iou: float = 0.45,
         imgsz: Optional[int] = None,
+        max_det: int = 1500,
         box_color: Tuple[int, int, int] = (0, 200, 255),
-        line_width: int = 2
+        line_width: int = 2,
+        draw_badge: bool = False,
+        reject_square_tubes: bool = True
     ) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
         """
         Run pipe detection with integrated anti-double bore suppression and distractor filtering.
@@ -222,6 +225,7 @@ class InsulationPipeDetector:
                 conf=conf,
                 iou=iou,
                 imgsz=imgsz,
+                max_det=max_det,
                 verbose=False
             )
             for r in results:
@@ -241,9 +245,11 @@ class InsulationPipeDetector:
                     })
 
         # Built-in Anti-Double & Distractor Suppression Pipeline
-        filtered = self._suppress_duplicates_and_distractors(raw_boxes, rgb)
+        filtered = self._suppress_duplicates_and_distractors(
+            raw_boxes, rgb, reject_square_tubes=reject_square_tubes
+        )
 
-        # Draw clean output: boxes + top-left count badge (NO label clutter)
+        # Draw clean output: pipe bounding boxes (kept clean and unobstructed)
         annotated = rgb.copy()
         for b in filtered:
             cv2.rectangle(
@@ -254,7 +260,8 @@ class InsulationPipeDetector:
                 line_width
             )
 
-        if len(filtered) > 0:
+        # Optional in-image count badge (default False: keeps image unobstructed)
+        if draw_badge and len(filtered) > 0:
             badge_text = f"Pipes: {len(filtered)}"
             font = cv2.FONT_HERSHEY_SIMPLEX
             badge_scale = max(0.65, min(w, h) / 750.0)
@@ -271,7 +278,8 @@ class InsulationPipeDetector:
     def _suppress_duplicates_and_distractors(
         self,
         boxes: List[Dict[str, Any]],
-        image_rgb: np.ndarray
+        image_rgb: np.ndarray,
+        reject_square_tubes: bool = True
     ) -> List[Dict[str, Any]]:
         """
         Pure geometric post-processing engine:
@@ -376,5 +384,68 @@ class InsulationPipeDetector:
                     else:
                         body_filtered.append(b)
                 remaining = body_filtered
+
+        # Pass 3: Spatial Outlier & Background Distractor Rejection
+        # Rejects isolated false detections (e.g. worker safety shoes on floor, far background watermarks)
+        # when a dense package/cluster of pipes exists.
+        if len(remaining) >= 6:
+            centers = np.array([[(b["x1"] + b["x2"]) / 2.0, (b["y1"] + b["y2"]) / 2.0] for b in remaining])
+            dims = np.array([max(b["w"], b["h"]) for b in remaining])
+            areas = np.array([b["w"] * b["h"] for b in remaining])
+            median_dim = float(np.median(dims))
+            median_area = float(np.median(areas))
+
+            n_rem = len(remaining)
+            min_dists = []
+            for i in range(n_rem):
+                dists = [math.hypot(centers[i, 0] - centers[j, 0], centers[i, 1] - centers[j, 1]) for j in range(n_rem) if i != j]
+                min_dists.append(min(dists) if dists else 0.0)
+            median_nn_dist = float(np.median(min_dists)) if min_dists else 1.0
+
+            cluster_filtered = []
+            for i, b in enumerate(remaining):
+                nn = min_dists[i]
+                ratio_nn = nn / max(1.0, median_nn_dist)
+                ratio_dim = nn / max(1.0, median_dim)
+                area_ratio = (b["w"] * b["h"]) / max(1.0, median_area)
+
+                # An isolated object > 4.5x normal neighbor distance and larger than typical pipes
+                # is an obvious distractor (e.g. floor shoe, far corner mark)
+                is_isolated_distractor = (ratio_nn > 4.5 and (ratio_dim > 2.0 or area_ratio > 2.0))
+                if not is_isolated_distractor:
+                    cluster_filtered.append(b)
+
+            remaining = cluster_filtered
+
+        # Pass 4: Square Hollow Section (SHS) & 4-Vertex Polygon Rejection
+        # Genuine pipes have circular/oval cross-sections (approxPolyDP produces >= 6 vertices).
+        # Square and rectangular structural steel tubes have 4 flat sides and 90-degree corners (approxPolyDP gives exactly 4 vertices).
+        if reject_square_tubes and len(remaining) > 0:
+            square_filtered = []
+            for b in remaining:
+                bw = b["x2"] - b["x1"]
+                bh = b["y2"] - b["y1"]
+                if bw >= 16 and bh >= 16 and b["y2"] <= h_img and b["x2"] <= w_img:
+                    crop = image_rgb[b["y1"]:b["y2"], b["x1"]:b["x2"]]
+                    if crop.size > 0:
+                        gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+                        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+                        edges = cv2.Canny(blurred, 35, 120)
+                        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                        is_square_tube = False
+                        if contours:
+                            c_largest = max(contours, key=cv2.contourArea)
+                            c_area = cv2.contourArea(c_largest)
+                            c_peri = cv2.arcLength(c_largest, True)
+                            if c_peri > 14 and c_area > 20:
+                                circ = (4.0 * math.pi * c_area) / (c_peri * c_peri)
+                                approx = cv2.approxPolyDP(c_largest, 0.035 * c_peri, True)
+                                if len(approx) == 4 and circ < 0.76:
+                                    is_square_tube = True
+                        if not is_square_tube:
+                            square_filtered.append(b)
+                        continue
+                square_filtered.append(b)
+            remaining = square_filtered
 
         return remaining

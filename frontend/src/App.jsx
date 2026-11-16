@@ -87,12 +87,11 @@ export default function App() {
 
       const modelDisplayName =
         data.active_profile === 'yolov8m'
-          ? 'YOLOv8 Medium (1024px, 99% Accuracy Engine)'
-          : 'YOLOv8 Nano (640px, Lightweight Baseline)';
+          ? 'YOLOv8 Medium (1024px High-Res Engine)'
+          : 'YOLOv8 Nano (640px Lightweight Engine)';
 
       setModelToast(`Switched active engine to: ${modelDisplayName}`);
       setTimeout(() => setModelToast(''), 4500);
-
       // If an image or video is already loaded, immediately re-run detection so user sees the new model's output!
       if (activeMode === 'video' && activeVideoFile) {
         processVideoFile(activeVideoFile);
@@ -121,9 +120,18 @@ export default function App() {
     }
   };
 
+  const MAX_IMAGE_SIZE_MB = 25;
+  const MAX_VIDEO_SIZE_MB = 100;
+
   // Process uploaded image file
   const processImageFile = async (file) => {
     if (!file) return;
+
+    if (file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024) {
+      setError(`Image size (${(file.size / (1024 * 1024)).toFixed(1)} MB) exceeds the maximum allowed limit of ${MAX_IMAGE_SIZE_MB} MB. Please upload an image under ${MAX_IMAGE_SIZE_MB} MB.`);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setActiveImageFile(file);
@@ -159,6 +167,12 @@ export default function App() {
   // Process uploaded video file
   const processVideoFile = async (file) => {
     if (!file) return;
+
+    if (file.size > MAX_VIDEO_SIZE_MB * 1024 * 1024) {
+      setError(`Video size (${(file.size / (1024 * 1024)).toFixed(1)} MB) exceeds the maximum allowed limit of ${MAX_VIDEO_SIZE_MB} MB. Please upload a video under ${MAX_VIDEO_SIZE_MB} MB.`);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setActiveVideoFile(file);
@@ -336,7 +350,7 @@ export default function App() {
             <strong>{activeModel === 'yolov8m' ? '1024 × 1024' : '640 × 640'}</strong>
           </div>
           <div className="engine-model-sub">
-            {activeModel === 'yolov8m' ? '98-99% Accuracy Target' : 'Lightweight Fast Baseline'}
+            {activeModel === 'yolov8m' ? 'High-Resolution Engine' : 'Lightweight Fast Baseline'}
           </div>
         </div>
       </aside>
@@ -365,11 +379,11 @@ export default function App() {
                   className={`model-pill ${activeModel === 'yolov8m' ? 'active' : ''}`}
                   onClick={() => handleModelSwitch('yolov8m')}
                   disabled={modelSwitching}
-                  title="Switch to YOLOv8 Medium (1024px, 98-99% accuracy)"
+                  title="Switch to YOLOv8 Medium (1024px)"
                 >
                   <Zap size={14} className="pill-icon" />
                   <span className="pill-title">YOLOv8m</span>
-                  <span className="pill-badge pill-badge-gold">1024px · 99%</span>
+                  <span className="pill-badge pill-badge-gold">1024px</span>
                 </button>
 
                 <button
@@ -377,11 +391,11 @@ export default function App() {
                   className={`model-pill ${activeModel === 'yolov8n' ? 'active' : ''}`}
                   onClick={() => handleModelSwitch('yolov8n')}
                   disabled={modelSwitching}
-                  title="Switch to YOLOv8 Nano (640px lightweight baseline)"
+                  title="Switch to YOLOv8 Nano (640px)"
                 >
                   <Cpu size={14} className="pill-icon" />
                   <span className="pill-title">YOLOv8n</span>
-                  <span className="pill-badge pill-badge-gray">640px · Fast</span>
+                  <span className="pill-badge pill-badge-gray">640px</span>
                 </button>
               </div>
             </div>
@@ -460,8 +474,8 @@ export default function App() {
               </h2>
               <p className="dropzone-text">
                 {isVideo
-                  ? 'Supports MP4, AVI, MOV, MKV, WEBM'
-                  : 'Supports JPG, PNG, WEBP, JFIF, GFIF, BMP, TIFF, GIF'}
+                  ? 'Supports MP4, AVI, MOV, MKV, WEBM • Max size: 100 MB'
+                  : 'Supports JPG, PNG, WEBP, BMP, TIFF • Max size: 25 MB'}
               </p>
             </div>
           )}
@@ -558,7 +572,13 @@ export default function App() {
                     <h3 className="section-title">
                       {isVideo ? '2. Detection Result (Video & Keyframe)' : '2. Detection Result'}
                     </h3>
-                    <span className="count-pill">{currentResult.count} Pipes</span>
+                    <span className="count-pill">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}>
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                        <polyline points="22 4 12 14.01 9 11.01" />
+                      </svg>
+                      {currentResult.count} Pipes Counted
+                    </span>
                   </div>
                 </div>
 
