@@ -132,11 +132,12 @@ def get_detector(profile_name: Optional[str] = None) -> InsulationPipeDetector:
     return detector
 
 PRESET_CONFIGS = {
-    "auto": {"conf": 0.20, "iou": 0.45, "name": "Auto (Optimized)"},
-    "grid": {"conf": 0.20, "iou": 0.45, "name": "Dense Touching Grid"},
-    "carton": {"conf": 0.22, "iou": 0.45, "name": "Warehouse Carton"},
-    "stack": {"conf": 0.20, "iou": 0.45, "name": "Standard Bundle / Stack"},
-    "metal_dense": {"conf": 0.20, "iou": 0.45, "name": "Dense Steel & Scaffolding"},
+    "auto": {"conf": 0.18, "iou": 0.45, "name": "Auto (Optimized)"},
+    "grid": {"conf": 0.18, "iou": 0.45, "name": "Dense Touching Grid"},
+    "carton": {"conf": 0.24, "iou": 0.45, "name": "Warehouse Carton"},
+    "stack": {"conf": 0.18, "iou": 0.45, "name": "Standard Bundle / Stack"},
+    "pyramid": {"conf": 0.20, "iou": 0.45, "name": "Pyramid Bundle"},
+    "metal_dense": {"conf": 0.18, "iou": 0.45, "name": "Dense Steel & Scaffolding"},
     "strict": {"conf": 0.35, "iou": 0.45, "name": "Strict High-Precision"},
 }
 
@@ -173,7 +174,7 @@ SAMPLE_IMAGES = [
         "id": "crop_6",
         "name": "6-Pipe Pyramid",
         "filename": "crop_6_pipes.jpg",
-        "preset": "stack",
+        "preset": "pyramid",
         "description": "Standard 6-pipe pyramid bundle"
     }
 ]

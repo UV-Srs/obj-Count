@@ -135,7 +135,7 @@ class InsulationPipeDetector:
     def detect(
         self,
         image_input: Union[str, np.ndarray],
-        conf: float = 0.20,
+        conf: float = 0.18,
         iou: float = 0.45,
         imgsz: Optional[int] = None,
         max_det: int = 1500,
