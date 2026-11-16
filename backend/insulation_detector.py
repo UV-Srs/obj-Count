@@ -386,8 +386,10 @@ class InsulationPipeDetector:
                 remaining = body_filtered
 
         # Pass 3: Spatial Outlier & Background Distractor Rejection
-        # Rejects isolated false detections (e.g. worker safety shoes on floor, far background watermarks)
-        # when a dense package/cluster of pipes exists.
+        # Rejects isolated false detections:
+        # 1. Background worker faces & heads
+        # 2. Worker safety shoes on floor & distant floor trash
+        # 3. Flap holes and cardboard voids on brown shipping boxes
         if len(remaining) >= 6:
             centers = np.array([[(b["x1"] + b["x2"]) / 2.0, (b["y1"] + b["y2"]) / 2.0] for b in remaining])
             dims = np.array([max(b["w"], b["h"]) for b in remaining])
@@ -409,10 +411,41 @@ class InsulationPipeDetector:
                 ratio_dim = nn / max(1.0, median_dim)
                 area_ratio = (b["w"] * b["h"]) / max(1.0, median_area)
 
-                # An isolated object > 4.5x normal neighbor distance and larger than typical pipes
-                # is an obvious distractor (e.g. floor shoe, far corner mark)
-                is_isolated_distractor = (ratio_nn > 4.5 and (ratio_dim > 2.0 or area_ratio > 2.0))
-                if not is_isolated_distractor:
+                # Distractor 1: Worker safety shoes on floor or far background objects
+                is_floor_shoe_distractor = (ratio_nn > 3.6 and (ratio_dim > 1.6 or area_ratio > 1.6))
+
+                # Distractor 2: Background Worker Head & Face Elimination
+                is_worker_face_distractor = False
+                if ratio_nn > 1.8 and b["h"] > 16 and b["w"] > 16:
+                    crop = image_rgb[b["y1"]:b["y2"], b["x1"]:b["x2"]]
+                    if crop.size > 0:
+                        ch, cw = crop.shape[:2]
+                        gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+                        center_g = gray[ch // 4:3 * ch // 4, cw // 4:3 * cw // 4].mean()
+                        outer_g = np.concatenate([
+                            gray[:ch // 4, :].ravel(),
+                            gray[3 * ch // 4:, :].ravel(),
+                            gray[:, :cw // 4].ravel(),
+                            gray[:, 3 * cw // 4:].ravel()
+                        ]).mean()
+                        # Real pipes have dark foam outer walls. Worker heads have hair/face darker than bright background warehouse wall
+                        if outer_g > center_g + 12:
+                            ycrcb = cv2.cvtColor(crop, cv2.COLOR_RGB2YCrCb)
+                            skin = (ycrcb[:, :, 1] >= 133) & (ycrcb[:, :, 1] <= 175) & (ycrcb[:, :, 2] >= 80) & (ycrcb[:, :, 2] <= 130)
+                            if np.mean(skin) > 0.25 and crop.mean(axis=(0, 1))[0] > crop.mean(axis=(0, 1))[2] + 2.0:
+                                is_worker_face_distractor = True
+
+                # Distractor 3: Flap Punch-Holes on Kraft Cardboard
+                is_cardboard_flap_distractor = False
+                if ratio_nn > 2.5 and b["y1"] > 0 and b["x1"] > 0:
+                    crop = image_rgb[b["y1"]:b["y2"], b["x1"]:b["x2"]]
+                    if crop.size > 0:
+                        c_rgb = crop.mean(axis=(0, 1))
+                        # Brown cardboard hue (R > 85, warm red > blue)
+                        if c_rgb[0] > 85 and (c_rgb[0] - c_rgb[2]) > 25 and (c_rgb[1] - c_rgb[2]) > 10:
+                            is_cardboard_flap_distractor = True
+
+                if not (is_floor_shoe_distractor or is_worker_face_distractor or is_cardboard_flap_distractor):
                     cluster_filtered.append(b)
 
             remaining = cluster_filtered
