@@ -434,7 +434,7 @@ body {
 /* Stats Grid */
 .stats-grid {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 1fr 1.5fr;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr 1.5fr;
   gap: 16px;
 }
 
@@ -718,6 +718,300 @@ body {
   background-color: #f8fafc;
 }
 
+/* Confidence Threshold Control Card */
+.confidence-control-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.confidence-control-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.confidence-label-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.confidence-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.control-icon {
+  color: #0284c7;
+}
+
+.control-icon-static {
+  color: #10b981;
+}
+
+.confidence-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.2px;
+}
+
+.confidence-badge {
+  font-size: 12px;
+  font-weight: 700;
+  background-color: #0f172a;
+  color: #38bdf8;
+  padding: 2px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.3px;
+}
+
+.confidence-badge-static {
+  background-color: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.manual-tuning-box {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.slider-header-inline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.slider-inline-caption {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.btn-reset-static {
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  color: #0284c7;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.btn-reset-static:hover {
+  color: #0369a1;
+}
+
+.btn-tuning-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background-color: #f8fafc;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  white-space: nowrap;
+}
+
+.btn-tuning-toggle:hover {
+  background-color: #ffffff;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.btn-tuning-toggle.active {
+  background-color: #0f172a;
+  border-color: #0f172a;
+  color: #ffffff;
+}
+
+.confidence-hint {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.confidence-slider-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 520px;
+}
+
+.confidence-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 4px;
+  background: #e2e8f0;
+  outline: none;
+  cursor: pointer;
+  accent-color: #0284c7;
+}
+
+.confidence-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #0284c7;
+  cursor: pointer;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.1s ease;
+}
+
+.confidence-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+.slider-range-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.confidence-presets {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.presets-caption {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  margin-right: 2px;
+}
+
+.preset-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background-color: #f8fafc;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+.preset-pill:hover:not(:disabled) {
+  background-color: #ffffff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.preset-pill.active {
+  background-color: #0f172a;
+  border-color: #0f172a;
+  color: #38bdf8;
+  font-weight: 700;
+}
+
+.confidence-action-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-count-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.12);
+  transition: all 0.15s ease-in-out;
+  white-space: nowrap;
+}
+
+.btn-count-action:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(15, 23, 42, 0.2);
+}
+
+.btn-count-action:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-count-pulse {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.35) !important;
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(14, 165, 233, 0.6);
+  }
+}
+
+.pending-recount-notice {
+  font-size: 11px;
+  font-weight: 600;
+  color: #0284c7;
+  text-align: center;
+}
+
+.conf-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background-color: #f1f5f9;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .app-layout {
@@ -743,6 +1037,20 @@ body {
 
   .actions-stat {
     grid-column: span 2;
+  }
+
+  .confidence-control-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .confidence-action-col {
+    width: 100%;
+  }
+
+  .btn-count-action {
+    width: 100%;
+    justify-content: center;
   }
 
   .page-body {

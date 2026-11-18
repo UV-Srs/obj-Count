@@ -47,10 +47,7 @@ app = FastAPI(
 # Upload limits (protects server memory and blocks accidental massive uploads)
 MAX_IMAGE_SIZE_MB = 25
 MAX_IMAGE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024
-MAX_VIDEO_SIZE_MB = 100
-MAX_VIDEO_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".jfif", ".gfif", ".png", ".webp", ".bmp", ".tiff", ".tif"}
-ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 
 # Enable CORS for React frontend (Vite default is 5173, CRA is 3000)
 app.add_middleware(
@@ -91,8 +88,6 @@ MODEL_PROFILES = {
 }
 
 SAMPLE_DIR = BACKEND_DIR / "sample_test"
-TEMP_VIDEO_DIR = BACKEND_DIR / "temp_videos"
-TEMP_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
 detector = None
 current_profile_in_use = None
@@ -132,13 +127,13 @@ def get_detector(profile_name: Optional[str] = None) -> InsulationPipeDetector:
     return detector
 
 PRESET_CONFIGS = {
-    "auto": {"conf": 0.18, "iou": 0.45, "name": "Auto (Optimized)"},
-    "grid": {"conf": 0.18, "iou": 0.45, "name": "Dense Touching Grid"},
-    "carton": {"conf": 0.22, "iou": 0.45, "name": "Warehouse Carton"},
-    "stack": {"conf": 0.18, "iou": 0.45, "name": "Standard Bundle / Stack"},
-    "pyramid": {"conf": 0.20, "iou": 0.45, "name": "Pyramid Bundle"},
-    "metal_dense": {"conf": 0.18, "iou": 0.45, "name": "Dense Steel & Scaffolding"},
-    "strict": {"conf": 0.35, "iou": 0.45, "name": "Strict High-Precision"},
+    "auto": {"conf": 0.04, "iou": 0.45, "name": "Auto (Optimized Static)"},
+    "grid": {"conf": 0.04, "iou": 0.45, "name": "Dense Touching Grid"},
+    "carton": {"conf": 0.04, "iou": 0.45, "name": "Warehouse Carton"},
+    "stack": {"conf": 0.04, "iou": 0.45, "name": "Standard Bundle / Stack"},
+    "pyramid": {"conf": 0.04, "iou": 0.45, "name": "Pyramid Bundle"},
+    "metal_dense": {"conf": 0.04, "iou": 0.45, "name": "Dense Steel & Scaffolding"},
+    "strict": {"conf": 0.15, "iou": 0.45, "name": "Strict High-Precision"},
 }
 
 SAMPLE_IMAGES = [
@@ -452,162 +447,14 @@ async def detect_sample(
     )
 
 
-@app.post("/api/detect-video")
-async def detect_video(
-    file: UploadFile = File(...),
-    preset: str = Form("auto"),
-    conf: Optional[float] = Form(None),
-    iou: Optional[float] = Form(None)
-):
-    """
-    Detect insulation pipes in an uploaded video file (MP4, AVI, MOV, MKV, WEBM).
-    Processes frames with anti-double concentric suppression and returns video metrics,
-    peak frame detections, and downloadable annotated video URL.
-    """
-    target_conf = conf
-    target_iou = iou
-    if target_conf is None or target_conf <= 0:
-        cfg = PRESET_CONFIGS.get(preset, PRESET_CONFIGS["auto"])
-        target_conf = cfg["conf"]
-    if target_iou is None or target_iou <= 0:
-        target_iou = 0.45
+# Serve built frontend single-page application if present
+FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
+if not FRONTEND_DIST.exists():
+    FRONTEND_DIST = BACKEND_DIR / "static"
 
-    if file.filename:
-        ext = Path(file.filename).suffix.lower()
-        if ext and ext not in ALLOWED_VIDEO_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported video format '{ext}'. Allowed formats: {', '.join(sorted(ALLOWED_VIDEO_EXTENSIONS))}"
-            )
-
-    file_bytes = await file.read()
-    if not file_bytes:
-        raise HTTPException(status_code=400, detail="Empty video file")
-
-    if len(file_bytes) > MAX_VIDEO_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Video size ({len(file_bytes) / (1024 * 1024):.1f} MB) exceeds maximum allowed limit of {MAX_VIDEO_SIZE_MB} MB."
-        )
-
-    video_id = str(uuid.uuid4())
-    in_temp = TEMP_VIDEO_DIR / f"in_{video_id}.mp4"
-    out_video_path = TEMP_VIDEO_DIR / f"out_{video_id}.mp4"
-
-    try:
-        with open(in_temp, "wb") as f:
-            f.write(file_bytes)
-
-        cap = cv2.VideoCapture(str(in_temp))
-        if not cap.isOpened():
-            raise HTTPException(status_code=400, detail="Could not open video file. Format may be unsupported or corrupted.")
-
-        fps = cap.get(cv2.CAP_PROP_FPS) or 20.0
-        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        if total_frames <= 0 or w <= 0 or h <= 0:
-            raise HTTPException(status_code=400, detail="Invalid video dimensions or zero frames found.")
-
-        # Stride: sample every 3 to 8 frames for smooth performance
-        stride = max(3, min(8, total_frames // 15))
-
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out_writer = cv2.VideoWriter(str(out_video_path), fourcc, fps, (w, h))
-
-        det = get_detector()
-        t0 = time.time()
-
-        counts = []
-        peak_count = 0
-        peak_b64 = None
-        peak_dets = []
-        last_annotated_bgr = None
-        idx = 0
-
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            if idx % stride == 0 or last_annotated_bgr is None:
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                annotated_rgb, detections = det.detect(
-                    rgb,
-                    conf=target_conf,
-                    iou=target_iou,
-                    imgsz=None
-                )
-                cnt = len(detections)
-                counts.append(cnt)
-                last_annotated_bgr = cv2.cvtColor(annotated_rgb, cv2.COLOR_RGB2BGR)
-
-                if cnt >= peak_count or peak_b64 is None:
-                    peak_count = cnt
-                    peak_dets = detections
-                    peak_b64 = image_to_base64(last_annotated_bgr)
-
-            out_writer.write(last_annotated_bgr)
-            idx += 1
-
-        cap.release()
-        out_writer.release()
-        t_elapsed_ms = round((time.time() - t0) * 1000, 1)
-
-        # Format peak detections coordinates without confidence column for UI consistency
-        formatted_peak_dets = []
-        for i, d in enumerate(peak_dets, 1):
-            formatted_peak_dets.append({
-                "id": i,
-                "x1": d["x1"],
-                "y1": d["y1"],
-                "x2": d["x2"],
-                "y2": d["y2"],
-                "width": d["x2"] - d["x1"],
-                "height": d["y2"] - d["y1"],
-            })
-
-        avg_cnt = round(sum(counts) / max(1, len(counts)), 1) if counts else 0
-
-        return {
-            "count": peak_count,
-            "average_count": avg_cnt,
-            "metrics": {
-                "total_frames": idx,
-                "processed_frames": len(counts),
-                "fps": round(fps, 1),
-                "duration_sec": round(idx / fps, 1) if fps > 0 else 0,
-                "inference_time_ms": t_elapsed_ms,
-                "video_width": w,
-                "video_height": h,
-                "model_profile": current_profile_in_use or ACTIVE_MODEL_PROFILE,
-                "model_imgsz": det.native_imgsz,
-                "model_name": MODEL_PROFILES.get(current_profile_in_use or ACTIVE_MODEL_PROFILE, {}).get("name", "YOLOv8")
-            },
-            "video_url": f"/api/download-video/{video_id}",
-            "annotated_image": peak_b64,
-            "detections": formatted_peak_dets
-        }
-    finally:
-        if in_temp.exists():
-            try:
-                os.remove(in_temp)
-            except Exception:
-                pass
-
-
-@app.get("/api/download-video/{video_id}")
-def download_video(video_id: str):
-    """Download or stream processed video with pipe bounding boxes and counts."""
-    video_path = TEMP_VIDEO_DIR / f"out_{video_id}.mp4"
-    if not video_path.exists():
-        raise HTTPException(status_code=404, detail="Video file not found or expired")
-    return FileResponse(
-        path=str(video_path),
-        media_type="video/mp4",
-        filename=f"detected_pipe_video_{video_id[:8]}.mp4"
-    )
+if FRONTEND_DIST.exists():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
 
 
 if __name__ == "__main__":

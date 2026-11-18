@@ -27,10 +27,8 @@ try:
 except ImportError:
     ort = None
 
-try:
-    from ultralytics import YOLO
-except ImportError:
-    YOLO = None
+# Ultralytics is lazily loaded only if PyTorch model is explicitly required
+YOLO = None
 
 try:
     Image.register_extension("JPEG", ".gfif")
@@ -110,76 +108,35 @@ class InsulationPipeDetector:
             except Exception:
                 pass
             self.use_onnx = True
-        elif YOLO is not None and os.path.exists(model_path):
-            self.torch_model = YOLO(model_path)
-            if "1024" in os.path.basename(model_path) or "yolov8m" in os.path.basename(model_path):
-                self.native_imgsz = 1024
-            self.use_onnx = False
-        elif os.path.exists(model_path) and model_path.endswith(".onnx") and ort is not None:
-            self.session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
-            self.input_name = self.session.get_inputs()[0].name
-            try:
-                shape = self.session.get_inputs()[0].shape
-                if len(shape) >= 4 and isinstance(shape[2], int) and shape[2] > 0:
-                    self.native_imgsz = int(shape[2])
-            except Exception:
-                pass
-            self.use_onnx = True
         else:
-            raise RuntimeError(
-                f"Cannot load detector: model_path='{model_path}', "
-                f"onnx_candidate='{onnx_candidate}' (ort_loaded={ort is not None}), "
-                f"ultralytics_loaded={YOLO is not None}"
-            )
-
-    def detect(
-        self,
-        image_input: Union[str, np.ndarray],
-        conf: float = 0.18,
-        iou: float = 0.45,
-        imgsz: Optional[int] = None,
-        max_det: int = 1500,
-        box_color: Tuple[int, int, int] = (0, 200, 255),
-        line_width: int = 2,
-        draw_badge: bool = False,
-        reject_square_tubes: bool = True
-    ) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
-        """
-        Run pipe detection with integrated anti-double bore suppression and distractor filtering.
-
-        Args:
-            image_input: File path string or RGB numpy array.
-            conf: Confidence threshold (default 0.25).
-            iou: IoU threshold for model NMS (default 0.45).
-            imgsz: Resolution for inference (default None -> auto-detected from model).
-            box_color: BGR/RGB tuple for drawn boxes (default vibrant amber-gold).
-            line_width: Thickness of bounding boxes.
-
-        Returns:
-            Tuple of:
-                annotated_image: Image with clean boxes and total count badge.
-                detections: List of filtered pipe dicts with coordinates and confidence.
-        """
-        if imgsz is None:
-            imgsz = getattr(self, "native_imgsz", 640)
-        # Load image if file path, PIL Image, or numpy array
-        if isinstance(image_input, str):
-            bgr = cv2.imread(image_input)
-            if bgr is not None:
-                rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            else:
+            global YOLO
+            if YOLO is None:
                 try:
-                    pil_img = Image.open(image_input).convert("RGB")
-                    rgb = np.array(pil_img)
-                except Exception as e:
-                    raise FileNotFoundError(f"Could not load image from '{image_input}': {e}")
-        elif isinstance(image_input, Image.Image):
-            rgb = np.array(image_input.convert("RGB"))
-        else:
-            rgb = image_input.copy()
+                    from ultralytics import YOLO as _YOLO
+                    YOLO = _YOLO
+                except Exception:
+                    YOLO = None
+            if YOLO is not None and os.path.exists(model_path):
+                self.torch_model = YOLO(model_path)
+                if "1024" in os.path.basename(model_path) or "yolov8m" in os.path.basename(model_path):
+                    self.native_imgsz = 1024
+                self.use_onnx = False
+            else:
+                raise RuntimeError(
+                    f"Cannot load detector: model_path='{model_path}', "
+                    f"onnx_candidate='{onnx_candidate}' (ort_loaded={ort is not None}), "
+                    f"ultralytics_loaded={YOLO is not None}"
+                )
 
+    def _forward_infer(
+        self,
+        rgb: np.ndarray,
+        imgsz: int,
+        conf: float,
+        iou: float,
+        max_det: int = 1500
+    ) -> List[Dict[str, Any]]:
         h, w = rgb.shape[:2]
-
         raw_boxes = []
         if self.use_onnx:
             padded, r, (dw, dh) = letterbox(rgb, (imgsz, imgsz))
@@ -243,6 +200,124 @@ class InsulationPipeDetector:
                         "w": x2 - x1,
                         "h": y2 - y1
                     })
+        return raw_boxes
+
+    def _cross_view_consensus(
+        self,
+        b1_list: List[Dict[str, Any]],
+        b2_list: List[Dict[str, Any]],
+        iou_thresh: float = 0.45
+    ) -> List[Dict[str, Any]]:
+        matched_b2 = set()
+        consensus = []
+        for b1 in b1_list:
+            best_iou = 0.0
+            best_j = -1
+            for j, b2 in enumerate(b2_list):
+                if j in matched_b2:
+                    continue
+                ix1 = max(b1["x1"], b2["x1"])
+                iy1 = max(b1["y1"], b2["y1"])
+                ix2 = min(b1["x2"], b2["x2"])
+                iy2 = min(b1["y2"], b2["y2"])
+                iw = max(0.0, ix2 - ix1)
+                ih = max(0.0, iy2 - iy1)
+                inter = iw * ih
+                union = (b1["w"] * b1["h"]) + (b2["w"] * b2["h"]) - inter
+                iou = inter / max(1.0, union)
+                if iou > best_iou:
+                    best_iou = iou
+                    best_j = j
+            if best_iou >= iou_thresh:
+                matched_b2.add(best_j)
+                b2 = b2_list[best_j]
+                consensus.append({
+                    "x1": int((b1["x1"] + b2["x1"]) / 2),
+                    "y1": int((b1["y1"] + b2["y1"]) / 2),
+                    "x2": int((b1["x2"] + b2["x2"]) / 2),
+                    "y2": int((b1["y2"] + b2["y2"]) / 2),
+                    "conf": max(b1["conf"], b2["conf"]),
+                    "w": int((b1["w"] + b2["w"]) / 2),
+                    "h": int((b1["h"] + b2["h"]) / 2),
+                    "corroborated": True
+                })
+            else:
+                if b1["conf"] >= 0.11:
+                    b1["corroborated"] = False
+                    consensus.append(b1)
+
+        for j, b2 in enumerate(b2_list):
+            if j not in matched_b2 and b2["conf"] >= 0.28:
+                b2["corroborated"] = False
+                consensus.append(b2)
+
+        return consensus
+
+    def detect(
+        self,
+        image_input: Union[str, np.ndarray],
+        conf: float = 0.04,
+        iou: float = 0.45,
+        imgsz: Optional[int] = None,
+        max_det: int = 1500,
+        box_color: Tuple[int, int, int] = (0, 200, 255),
+        line_width: int = 2,
+        draw_badge: bool = False,
+        reject_square_tubes: bool = False,
+        use_tta: bool = False
+    ) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
+        """
+        Run pipe detection with integrated anti-double bore suppression and distractor filtering.
+
+        Args:
+            image_input: File path string or RGB numpy array.
+            conf: Confidence threshold (default 0.25).
+            iou: IoU threshold for model NMS (default 0.45).
+            imgsz: Resolution for inference (default None -> auto-detected from model).
+            box_color: BGR/RGB tuple for drawn boxes (default vibrant amber-gold).
+            line_width: Thickness of bounding boxes.
+
+        Returns:
+            Tuple of:
+                annotated_image: Image with clean boxes and total count badge.
+                detections: List of filtered pipe dicts with coordinates and confidence.
+        """
+        if imgsz is None:
+            imgsz = getattr(self, "native_imgsz", 640)
+        # Load image if file path, PIL Image, or numpy array
+        if isinstance(image_input, str):
+            bgr = cv2.imread(image_input)
+            if bgr is not None:
+                rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            else:
+                try:
+                    pil_img = Image.open(image_input).convert("RGB")
+                    rgb = np.array(pil_img)
+                except Exception as e:
+                    raise FileNotFoundError(f"Could not load image from '{image_input}': {e}")
+        elif isinstance(image_input, Image.Image):
+            rgb = np.array(image_input.convert("RGB"))
+        else:
+            rgb = image_input.copy()
+
+        h, w = rgb.shape[:2]
+
+        if use_tta:
+            raw_boxes = self._forward_infer(rgb, imgsz, conf, iou, max_det)
+            rgb_f = cv2.flip(rgb, 1)
+            raw2_f = self._forward_infer(rgb_f, imgsz, conf, iou, max_det)
+            unflipped2 = [{
+                "x1": w - b["x2"],
+                "y1": b["y1"],
+                "x2": w - b["x1"],
+                "y2": b["y2"],
+                "conf": b["conf"],
+                "w": b["w"],
+                "h": b["h"]
+            } for b in raw2_f]
+            raw_boxes = self._cross_view_consensus(raw_boxes, unflipped2, iou_thresh=iou)
+        else:
+            raw_boxes = self._forward_infer(rgb, imgsz, conf, iou, max_det)
 
         # Built-in Anti-Double & Distractor Suppression Pipeline
         filtered = self._suppress_duplicates_and_distractors(
@@ -302,14 +377,33 @@ class InsulationPipeDetector:
                 continue
 
             aspect = box_h / max(1.0, box_w)
-            # Pipe cross sections (even squashed or oval) have aspect ratio between 0.35 and 2.85
-            if aspect > 2.85 or aspect < 0.35:
+            inv_aspect = box_w / max(1.0, box_h)
+            # Pipe cross sections viewed at angles can be elliptical (aspect ratio up to 2.40)
+            # Cardboard flap handle slots and long background stripes have aspect ratio > 2.50
+            if aspect > 2.45 or inv_aspect > 2.45:
                 continue
 
             valid_boxes.append(b)
 
         if not valid_boxes:
             return []
+
+        # Pass 0b: Boundary Fractional Circle Pruning (Phase 2)
+        # Chopped slivers at extreme image borders (e.g. 10-25% slice of a pipe at frame boundary)
+        # register as false positives or fragmented duplicate counts.
+        if len(valid_boxes) >= 4:
+            median_area = float(np.median([b["w"] * b["h"] for b in valid_boxes]))
+            boundary_filtered = []
+            for b in valid_boxes:
+                touches_border = (b["x1"] <= 2 or b["y1"] <= 2 or b["x2"] >= w_img - 2 or b["y2"] >= h_img - 2)
+                if touches_border:
+                    bw, bh = b["w"], b["h"]
+                    aspect = max(bw, bh) / max(1.0, min(bw, bh))
+                    area = bw * bh
+                    if aspect > 1.75 and area < 0.40 * median_area:
+                        continue
+                boundary_filtered.append(b)
+            valid_boxes = boundary_filtered
 
         # Pass 1: Concentric Inner Bore Suppression (IoS)
         # Sort by area descending so outer tube is checked against inner bore
@@ -347,9 +441,15 @@ class InsulationPipeDetector:
                 ios = inter / area2
                 dist = math.hypot(c1x - c2x, c1y - c2y)
 
-                # If smaller box is substantially inside larger box and centers are close -> inner bore
-                if (ios >= 0.45 and dist < max_dim1 * 0.48) or ios >= 0.70:
+                # Strict concentric duplicate check:
+                # Inner bore duplicate must be enclosed (ios >= 0.70) and strictly concentric (dist < max_dim1 * 0.20)
+                # Touching adjacent pipes in honeycomb grids have distinct centers and will never be suppressed.
+                if ios >= 0.70 and dist < max_dim1 * 0.20:
                     suppressed.add(j)
+                # Only suppress larger box if it is actually an elongated 3D cylinder body overlapping a circular face
+                elif ios >= 0.60 and (w1 * h1) >= 2.0 * area2 and (max_dim1 / min(w1, h1) > 1.85) and dist >= max_dim1 * 0.25:
+                    suppressed.add(i)
+                    break
 
         remaining = [b for idx, b in enumerate(sorted_boxes) if idx not in suppressed]
 
@@ -360,7 +460,7 @@ class InsulationPipeDetector:
                 bw = max(1.0, b["x2"] - b["x1"])
                 bh = max(1.0, b["y2"] - b["y1"])
                 ar = bh / bw
-                if 0.55 <= ar <= 1.80:
+                if 0.42 <= ar <= 2.38:
                     circular_faces.append(b)
 
             if len(circular_faces) >= 2:
@@ -414,38 +514,109 @@ class InsulationPipeDetector:
                 # Distractor 1: Worker safety shoes on floor or far background objects
                 is_floor_shoe_distractor = (ratio_nn > 3.6 and (ratio_dim > 1.6 or area_ratio > 1.6))
 
-                # Distractor 2: Background Worker Head & Face Elimination
+                # Distractor 1b: Caster wheels / cart tires on floor
+                is_floor_wheel_distractor = False
+                if ratio_nn > 2.0 and b["y2"] > h_img * 0.75:
+                    crop = image_rgb[b["y1"]:b["y2"], b["x1"]:b["x2"]]
+                    if crop.size > 0:
+                        ch, cw = crop.shape[:2]
+                        crop_gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+                        cg = crop_gray[int(ch * 0.3):int(ch * 0.7), int(cw * 0.3):int(cw * 0.7)].mean()
+                        mg = crop_gray.mean()
+                        if cg > 0.65 * mg and mg > 115:
+                            is_floor_wheel_distractor = True
+
+                # Distractor 2: Background Worker Head & Face Elimination (Annular Bore Aware)
+                # Genuine pipes have a deep dark concentric hollow bore (center_g < 0.45 * mean_g).
+                # Worker heads have no hollow bore, higher HSV saturation (skin tone), and sit isolated high above bundles.
                 is_worker_face_distractor = False
-                if ratio_nn > 1.8 and b["h"] > 16 and b["w"] > 16:
+                if ratio_nn > 1.7 and b["h"] > 16 and b["w"] > 16:
                     crop = image_rgb[b["y1"]:b["y2"], b["x1"]:b["x2"]]
                     if crop.size > 0:
                         ch, cw = crop.shape[:2]
                         gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
-                        center_g = gray[ch // 4:3 * ch // 4, cw // 4:3 * cw // 4].mean()
+                        center_g = gray[int(ch * 0.3):int(ch * 0.7), int(cw * 0.3):int(cw * 0.7)].mean()
+                        mean_g = gray.mean()
                         outer_g = np.concatenate([
                             gray[:ch // 4, :].ravel(),
                             gray[3 * ch // 4:, :].ravel(),
                             gray[:, :cw // 4].ravel(),
                             gray[:, 3 * cw // 4:].ravel()
                         ]).mean()
-                        # Real pipes have dark foam outer walls. Worker heads have hair/face darker than bright background warehouse wall
-                        if outer_g > center_g + 12:
-                            ycrcb = cv2.cvtColor(crop, cv2.COLOR_RGB2YCrCb)
-                            skin = (ycrcb[:, :, 1] >= 133) & (ycrcb[:, :, 1] <= 175) & (ycrcb[:, :, 2] >= 80) & (ycrcb[:, :, 2] <= 130)
-                            if np.mean(skin) > 0.25 and crop.mean(axis=(0, 1))[0] > crop.mean(axis=(0, 1))[2] + 2.0:
+
+                        # If it has a deep hollow bore, it is a pipe face, NOT a human head!
+                        has_hollow_bore = (center_g < 0.45 * mean_g and center_g < 48)
+                        if not has_hollow_bore and outer_g > center_g + 18:
+                            hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV)
+                            sat_mean = hsv[:, :, 1].mean()
+                            skin_mask = (hsv[:, :, 0] <= 28) & (hsv[:, :, 1] >= 42) & (hsv[:, :, 2] >= 45)
+                            skin_frac = np.mean(skin_mask)
+                            if skin_frac > 0.18 or sat_mean > 48:
                                 is_worker_face_distractor = True
 
-                # Distractor 3: Flap Punch-Holes on Kraft Cardboard
+                # Distractor 3: Cardboard Packaging Punch-Holes, Flap Cutouts & Vent Holes
+                # Real insulation pipes are made of dark neutral elastomeric foam (R ~ G ~ B, |R - B| < 15, R/B < 1.25).
+                # Cardboard packaging cutouts / vent holes / handle slots are holes punched in kraft cardboard:
+                # 1. The substrate around the cutout is warm kraft cardboard (R >= 42, R - B >= 20, R/B >= 1.35).
+                # 2. The annular ring of a cutout itself is kraft cardboard, NOT foam (ring_rgb[0] >= 55, R - B >= 22, R/B >= 1.28).
+                # 3. Flap cutouts / handle slots located on carton flaps or outside pipe clusters lack hollow bore foam contrast.
                 is_cardboard_flap_distractor = False
-                if ratio_nn > 2.5 and b["y1"] > 0 and b["x1"] > 0:
-                    crop = image_rgb[b["y1"]:b["y2"], b["x1"]:b["x2"]]
-                    if crop.size > 0:
-                        c_rgb = crop.mean(axis=(0, 1))
-                        # Brown cardboard hue (R > 85, warm red > blue)
-                        if c_rgb[0] > 85 and (c_rgb[0] - c_rgb[2]) > 25 and (c_rgb[1] - c_rgb[2]) > 10:
-                            is_cardboard_flap_distractor = True
+                bx1, by1, bx2, by2 = b["x1"], b["y1"], b["x2"], b["y2"]
+                bw, bh = bx2 - bx1, by2 - by1
+                crop = image_rgb[by1:by2, bx1:bx2]
+                if crop.size > 0:
+                    ch, cw = crop.shape[:2]
+                    Y, X = np.ogrid[:ch, :cw]
+                    cx, cy = cw / 2.0, ch / 2.0
+                    r_max = min(cx, cy)
+                    if r_max >= 3:
+                        dist = np.sqrt((X - cx)**2 + (Y - cy)**2)
+                        core_mask = dist <= (r_max * 0.35)
+                        ring_mask = (dist >= (r_max * 0.45)) & (dist <= (r_max * 0.90))
+                        if np.any(ring_mask) and np.any(core_mask):
+                            ring_rgb = crop[ring_mask].mean(axis=0)
+                            core_rgb = crop[core_mask].mean(axis=0)
+                            ring_diff_rb = float(ring_rgb[0] - ring_rgb[2])
+                            ring_ratio_rb = float(ring_rgb[0] / max(1.0, ring_rgb[2]))
+                            
+                            crop_gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+                            ring_gray = float(crop_gray[ring_mask].mean())
+                            core_gray = float(crop_gray[core_mask].mean())
+                            contrast = ring_gray - core_gray
 
-                if not (is_floor_shoe_distractor or is_worker_face_distractor or is_cardboard_flap_distractor):
+                            pad = max(4, int(min(bw, bh) * 0.35))
+                            top_p = image_rgb[max(0, by1 - pad):by1, max(0, bx1):min(w_img, bx2)]
+                            bot_p = image_rgb[by2:min(h_img, by2 + pad), max(0, bx1):min(w_img, bx2)]
+                            left_p = image_rgb[max(0, by1):min(h_img, by2), max(0, bx1 - pad):bx1]
+                            right_p = image_rgb[max(0, by1):min(h_img, by2), bx2:min(w_img, bx2 + pad)]
+
+                            kraft_sides = 0
+                            strong_kraft_sides = 0
+                            for s in [top_p, bot_p, left_p, right_p]:
+                                if s.size > 0:
+                                    sm = s.mean(axis=(0, 1))
+                                    diff_rb = sm[0] - sm[2]
+                                    ratio_rb = sm[0] / max(1.0, sm[2])
+                                    if sm[0] >= 42 and diff_rb >= 20 and ratio_rb >= 1.35:
+                                        kraft_sides += 1
+                                    if sm[0] >= 55 and diff_rb >= 30 and ratio_rb >= 1.45:
+                                        strong_kraft_sides += 1
+
+                            # Condition 1: The annular ring itself is kraft cardboard (not neutral foam)
+                            is_cardboard_ring = (ring_rgb[0] >= 55 and ring_diff_rb >= 22 and ring_ratio_rb >= 1.28) or ring_diff_rb >= 35
+                            if is_cardboard_ring and kraft_sides >= 1:
+                                is_cardboard_flap_distractor = True
+                            # Condition 2: Cardboard vent hole or flap slot surrounded on 3+ sides by cardboard
+                            elif kraft_sides >= 3:
+                                slot_aspect = max(bw, bh) / max(1.0, min(bw, bh))
+                                if slot_aspect > 1.60 or contrast < 20 or ratio_nn > 1.35 or ring_diff_rb > 10:
+                                    is_cardboard_flap_distractor = True
+                            # Condition 3: Background cardboard hole or flap cutout outside main cluster
+                            elif kraft_sides >= 2 and ratio_nn > 1.45:
+                                if contrast < 22 or is_cardboard_ring or ring_diff_rb > 14 or strong_kraft_sides >= 1:
+                                    is_cardboard_flap_distractor = True
+
+                if not (is_floor_shoe_distractor or is_floor_wheel_distractor or is_worker_face_distractor or is_cardboard_flap_distractor):
                     cluster_filtered.append(b)
 
             remaining = cluster_filtered
@@ -453,15 +624,23 @@ class InsulationPipeDetector:
         # Pass 4: Square Hollow Section (SHS) & 4-Vertex Polygon Rejection
         # Genuine pipes have circular/oval cross-sections (approxPolyDP produces >= 6 vertices).
         # Square and rectangular structural steel tubes have 4 flat sides and 90-degree corners (approxPolyDP gives exactly 4 vertices).
+        # Only evaluate large sections (>= 50px). Low-res small pipe circles (< 50px) naturally rasterize to 4-5 vertices.
         if reject_square_tubes and len(remaining) > 0:
             square_filtered = []
             for b in remaining:
                 bw = b["x2"] - b["x1"]
                 bh = b["y2"] - b["y1"]
-                if bw >= 16 and bh >= 16 and b["y2"] <= h_img and b["x2"] <= w_img:
+                if bw >= 50 and bh >= 50 and b["y2"] <= h_img and b["x2"] <= w_img:
                     crop = image_rgb[b["y1"]:b["y2"], b["x1"]:b["x2"]]
                     if crop.size > 0:
                         gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+                        ch, cw = crop.shape[:2]
+                        cg = gray[int(ch * 0.3):int(ch * 0.7), int(cw * 0.3):int(cw * 0.7)].mean()
+                        mg = gray.mean()
+                        if cg < 65 and cg < 0.72 * mg:
+                            square_filtered.append(b)
+                            continue
+
                         blurred = cv2.GaussianBlur(gray, (3, 3), 0)
                         edges = cv2.Canny(blurred, 35, 120)
                         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -470,15 +649,129 @@ class InsulationPipeDetector:
                             c_largest = max(contours, key=cv2.contourArea)
                             c_area = cv2.contourArea(c_largest)
                             c_peri = cv2.arcLength(c_largest, True)
-                            if c_peri > 14 and c_area > 20:
+                            if c_peri > 30 and c_area > 100:
                                 circ = (4.0 * math.pi * c_area) / (c_peri * c_peri)
                                 approx = cv2.approxPolyDP(c_largest, 0.035 * c_peri, True)
-                                if len(approx) == 4 and circ < 0.76:
+                                if len(approx) == 4 and circ < 0.70:
                                     is_square_tube = True
                         if not is_square_tube:
                             square_filtered.append(b)
                         continue
                 square_filtered.append(b)
             remaining = square_filtered
+
+        # Pass 5: Annular Geometric Ring & Negative Interstitial Void Rejection
+        # 1. Negative Interstitial Voids (the dark triangular gaps between touching circular pipes):
+        #    - A real pipe has a dark hollow core surrounded by a convex circular/elliptical foam wall ring.
+        #    - A negative void is formed by touching pipe outer circumferences; its boundary is CONCAVE (solidity < 0.58)
+        #      and outer corners are brighter than the annular wall ring.
+        # 2. Solid flat surfaces (shipping labels, light reflection patches, flat cardboard):
+        #    - Lack a central dark bore (core_mean >= ring_mean - 4 and ring_mean > 120).
+        if len(remaining) > 0:
+            annular_filtered = []
+            for b in remaining:
+                bw = b["x2"] - b["x1"]
+                bh = b["y2"] - b["y1"]
+                if bw < 12 or bh < 12:
+                    annular_filtered.append(b)
+                    continue
+
+                crop = image_rgb[b["y1"]:b["y2"], b["x1"]:b["x2"]]
+                if crop.size == 0:
+                    continue
+
+                ch, cw = crop.shape[:2]
+                gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+                cx, cy = cw / 2.0, ch / 2.0
+                r_max = min(cx, cy)
+                if r_max < 6:
+                    annular_filtered.append(b)
+                    continue
+
+                Y, X = np.ogrid[:ch, :cw]
+                dist_from_center = np.sqrt((X - cx)**2 + (Y - cy)**2)
+
+                core_mask = dist_from_center <= (r_max * 0.35)
+                ring_mask = (dist_from_center >= (r_max * 0.45)) & (dist_from_center <= (r_max * 0.85))
+                corner_mask = dist_from_center >= (r_max * 0.95)
+
+                core_vals = gray[core_mask]
+                ring_vals = gray[ring_mask]
+                corner_vals = gray[corner_mask]
+
+                if len(core_vals) < 5 or len(ring_vals) < 10:
+                    annular_filtered.append(b)
+                    continue
+
+                core_mean = float(np.mean(core_vals))
+                ring_mean = float(np.mean(ring_vals))
+                corner_mean = float(np.mean(corner_vals)) if len(corner_vals) > 0 else ring_mean
+
+                # Featureless bright flat distractor (labels, carton patches)
+                if core_mean >= ring_mean - 4 and ring_mean > 120:
+                    continue
+
+                # Inner bore convexity test for negative interstice voids
+                thresh_val = min(core_mean + 25, (core_mean + ring_mean) / 2.0)
+                _, binary = cv2.threshold(gray, thresh_val, 255, cv2.THRESH_BINARY_INV)
+
+                center_roi = np.zeros_like(binary)
+                cv2.circle(center_roi, (int(cx), int(cy)), int(r_max * 0.75), 255, -1)
+                binary_masked = cv2.bitwise_and(binary, center_roi)
+
+                contours, _ = cv2.findContours(binary_masked, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                solidity = 1.0
+                if contours:
+                    best_c = None
+                    min_d = 9999.0
+                    for c in contours:
+                        M = cv2.moments(c)
+                        if M["m00"] > 5:
+                            mcx = M["m10"] / M["m00"]
+                            mcy = M["m01"] / M["m00"]
+                            d = math.hypot(mcx - cx, mcy - cy)
+                            if d < min_d:
+                                min_d = d
+                                best_c = c
+                    if best_c is not None:
+                        c_area = cv2.contourArea(best_c)
+                        hull = cv2.convexHull(best_c)
+                        h_area = cv2.contourArea(hull)
+                        if h_area > 10:
+                            solidity = c_area / h_area
+
+                # Reject concave negative interstitial voids
+                if solidity < 0.58 and corner_mean > ring_mean + 12:
+                    continue
+
+                # Multi-Attribute Quality Composite Gating (Phase 1)
+                # Calculates composite quality score combining neural confidence, inner bore solidity,
+                # foam wall contrast, and circularity.
+                conf_val = float(b.get("conf", 0.5))
+                contrast = max(0.0, (ring_mean - core_mean) / max(1.0, ring_mean + core_mean))
+                circularity = 1.0
+                if contours and best_c is not None:
+                    c_peri = cv2.arcLength(best_c, True)
+                    if c_peri > 10:
+                        circularity = min(1.0, (4.0 * math.pi * c_area) / max(1.0, c_peri * c_peri))
+
+                quality = (
+                    0.40 * conf_val +
+                    0.30 * min(1.0, solidity) +
+                    0.20 * min(1.0, contrast * 2.5) +
+                    0.10 * min(1.0, circularity)
+                )
+
+                # Low-quality false alarm rejection (calibrated for low-contrast warehouse shadows)
+                if quality < 0.18:
+                    continue
+
+                # Uncorroborated single-view false alarm rejection
+                if not b.get("corroborated", True) and quality < 0.26:
+                    continue
+
+                b["quality"] = round(quality, 3)
+                annular_filtered.append(b)
+            remaining = annular_filtered
 
         return remaining

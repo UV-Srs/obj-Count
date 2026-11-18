@@ -1,0 +1,31 @@
+# Version control & internal agent data
+.git/
+.gitignore
+.brain/
+.github/
+
+# Dataset & heavy training archives
+data/
+pipe_dataset_colab.zip
+runs/
+scratch/
+
+# Local cache & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.cache
+*.bak
+
+# Virtual environments & IDE
+.venv/
+env/
+venv/
+.idea/
+.vscode/
+
+# Local build artifacts
+frontend/node_modules/
+node_modules/
+frontend/dist/
+dist/
